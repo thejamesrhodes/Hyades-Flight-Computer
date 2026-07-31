@@ -15,10 +15,13 @@ Custom STM32H743 flight computer and GNC software for an actively roll-controlle
 
 *This is an engineering project, not a product. The safety case, regulatory compliance, and airworthiness of any vehicle built from this material are the builder's sole responsibility.*
 
-The project is designed to demonstrate:
-- Configurable real-time control for an actively controlled rocket,
-- Adaptable connectors, including I2C, UART and 6 PWM connectors, currently with 4 being used for canard-based active roll stabilisation
-- In flight data logging and optional in-flight telemetry,
+The project is designed to:
+- Provide a modular active roll-stabilisation system suitable for a wide range of high-power rockets.
+- Improve flight data quality by reducing excessive vehicle roll.
+- Improve parachute deployment reliability by limiting roll-induced line twist.
+- Provide a reusable avionics platform for future guidance, navigation and control research.
+- Maintain compliance with applicable rocketry regulations through both hardware and software design decisions.
+- Release all hardware, firmware and simulation tools as open source.
 
 This repository contains the hardware design, embedded software, simulation models, and analysis tools used during development.
 
@@ -26,7 +29,20 @@ This repository contains the hardware design, embedded software, simulation mode
 
 ## Specification
 
-%Words
+## Specification
+
+| Parameter | Specification |
+|-----------|---------------|
+| Purpose | Active roll stabilisation for mid- and high-power rockets |
+| Flight Computer | STM32H743 ARM Cortex-M7 |
+| Control Surfaces | Four independently actuated canards |
+| Control System | Configurable closed-loop roll controller with dynamic-pressure gain scheduling |
+| Interfaces | I²C, UART and 6× PWM outputs |
+| Data | On-board logging with optional telemetry |
+| Simulation | MATLAB, Simulink, 6DOF modelling and Monte Carlo analysis |
+| Architecture | Modular flight computer, sensor board and power distribution board |
+| Design Goals | Low mass, modular, reliable and adaptable |
+| License | Apache 2.0 |
 
 ---
 
@@ -49,9 +65,22 @@ This repository contains the hardware design, embedded software, simulation mode
 
 ---
 
-## System Architecture
+## Repository Structure
 
-%Words
+```text
+Hyades-Flight-Computer
+│
+├── Firmware/
+├── Hardware/
+│   ├── PDB/
+│   └── MCU Board/
+├── Simulation/
+│   ├── Buck Regulator/
+│   ├── HSE Clock/
+│   └── Roll Tuning/
+├── Images/
+└── Documentation/
+```
 
 ---
 
@@ -133,7 +162,7 @@ Front avionics assembly, WIP
 
 ## MATLAB Monte Carlo Analysis
 
-Demonstrating a <0.5s roll rate settling time for a step response with the current optimal gainset.
+Montecarlo (n = 4000) Demonstrating a <0.5s roll rate settling time for a step response with the current optimal gainset.
 
 <p align="center">
 <img src="Simulation/Matlab Roll Tuning/Figures/Step_Response_Figure_1.png" width="300">
@@ -151,7 +180,7 @@ Visualises the correlation structures between convergent roll damping and the di
 
 ## MATLAB Gain Optimisation
 
-Heatmaps where each square is a n=400 montecarlo simulation at the corresponding proportional and integral gains plotted against some measure relevant to system performance (note gains are q normalised as follows: Kp = c/q  and  Ki = Kp*Ti, where q is dynamic pressure (Pa), c and Ti are the user configurable parameters.).
+Controller gains are parameterised using dynamic-pressure-normalised coefficients to maintain approximately constant closed-loop behaviour throughout ascent. A grid search evaluates each gain combination using 400 Monte Carlo simulations and scores them according to settling time, overshoot, actuator demand and stability margin. (note gains are q normalised as follows: Kp = c/q  and  Ki = Kp*Ti, where q is dynamic pressure (Pa), c and Ti are the user configurable parameters.).
 
 <p align="center">
 <img src="Simulation/Matlab Roll Tuning/Figures/Heatmap_Figure_5.png" width="300">
