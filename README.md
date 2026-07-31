@@ -117,13 +117,19 @@ This repository contains the hardware design, embedded software, simulation mode
 <img src="Simulation/Matlab Roll Tuning/Figures/Heatmap_Figure_5.png" width="884">
 </p>
 
+---
+
 <p align="center">
 <img src="Simulation/Matlab Roll Tuning/Figures/Heatmap_Figure_6.png" width="884">
 </p>
 
+---
+
 <p align="center">
 <img src="Simulation/Matlab Roll Tuning/Figures/Heatmap_Figure_7.png" width="884">
 </p>
+
+---
 
 <p align="center">
 <img src="Simulation/Matlab Roll Tuning/Figures/Heatmap_Figure_8.png" width="884">
