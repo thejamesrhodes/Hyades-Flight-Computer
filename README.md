@@ -1,5 +1,5 @@
 <p align="center">
-<img src="Images/Banner.png" width="884">
+<img src="Images/OpenRocket_1.png" width="884">
 </p>
 
 ---
@@ -26,6 +26,8 @@ This repository contains the hardware design, embedded software, simulation mode
 | Flight Computer Design          | ✅ Complete |
 | Flight Computer Testing         | 🚧 In Progress |
 | Flight Software                 | 🚧 In Progress |
+| Flight Hardware Design          | 🚧 In Progress |
+| Flight Hardware Testing         | 🚧 In Progress |
 | Simulink Roll Model             | ✅ Complete |
 | Simulink 6DOF Model             | ✅ Complete |
 | MATLAB Monte Carlo Analysis     | ✅ Complete |
@@ -37,21 +39,90 @@ This repository contains the hardware design, embedded software, simulation mode
 ---
 
 **Flight Computer Design**
+<p align="center">
+<img src="Images/PCB_MCU.png" width="884">
+</p>
+
+---
+
+<p align="center">
+<img src="Images/PCB_PDB.png" width="884">
+</p>
 
 **Flight Computer Testing**
 
+
+
+**Flight Hardware Design**
+
+<p align="center">
+<img src="Images/Full_Assembly.png" width="884">
+</p>
+
+---
+
+<p align="center">
+<img src="Images/Rear_Fin_Can_Assembly.png" width="884">
+</p>
+
+---
+
+<p align="center">
+<img src="Images/Front_Avionics_Assembly.png" width="884">
+</p>
+
+**Flight Hardware Testing**
+
+
+
 **Flight Software**
+
+
 
 **Simulink Roll Model**
 
+
+
 **Simulink 6DOF Model**
+
+
 
 **MATLAB Monte Carlo Analysis**
 
+<p align="center">
+<img src="Simulation/Matlab Roll Tuning/Figures/Step_Response_Figure_1.png" width="884">
+</p>
+
+---
+
+<p align="center">
+<img src="Simulation/Matlab Roll Tuning/Figures/Step_Response_Figure_2.png" width="884">
+</p>
+
+---
+
+<p align="center">
+<img src="Simulation/Matlab Roll Tuning/Figures/Step_Response_Figure_3.png" width="884">
+</p>
+
+---
+
+<p align="center">
+<img src="Simulation/Matlab Roll Tuning/Figures/Step_Response_Figure_4.png" width="884">
+</p>
+
 **MATLAB Gain Optimisation**
+
+
 
 **System Integration**
 
+
+
 **HITL Testing**
 
+
+
 **Flight Testing**
+
+
