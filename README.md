@@ -74,6 +74,7 @@ The PDB board, provides power and distributes PWM signals to the servos, as well
 ## Flight Computer Testing
 
 0 Ohm Series Termination vs 47 Ohm Series Termination for the 24Mhz HSE Oscillator, unnecessary? Yes, but a good opportunity to learn SPICE Simulations, plus it looks cool.
+Below the schematic that the simulations where derived from.
 
 <p align="center">
 <img src="Simulation/HSE Clock SPICE Simulation/Figures/0 Ohm Series Termination Figure.png" width="300">
@@ -81,13 +82,7 @@ The PDB board, provides power and distributes PWM signals to the servos, as well
 <img src="Simulation/HSE Clock SPICE Simulation/Figures/Schematic Figure.png" width="600">
 </p>
 
----
 
-The schematic that the simulations where derived from.
-
-<p align="center">
-
-</p>
 
 ---
 
