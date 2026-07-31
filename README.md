@@ -1,3 +1,7 @@
+<p align="center">
+<img src="images/Banner.png" width="884">
+</p>
+
 This Repository contains most relevant files that where used and developed during the development of this project, provided to help anyone working on a similar project.
 
 **Hyades - Active attitude control system**
