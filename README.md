@@ -2,25 +2,31 @@
 <img src="Images/OpenRocket_1.png" width="884">
 </p>
 
-![Status](https://img.shields.io/badge/status-active%20development-orange)
-![MCU](https://img.shields.io/badge/MCU-STM32H743-blue)
-![MATLAB](https://img.shields.io/badge/MATLAB-R2025b-red)
-![KiCad](https://img.shields.io/badge/KiCad-10-blue)
-
 ---
 
 # Hyades Flight Computer
 
 Custom STM32H743 flight computer and GNC software for an actively roll-controlled high-power rocket.
+
+![Status](https://img.shields.io/badge/status-active%20development-orange)
+![MCU](https://img.shields.io/badge/MCU-STM32H743-blue)
+![MATLAB](https://img.shields.io/badge/MATLAB-R2025b-red)
+![KiCad](https://img.shields.io/badge/KiCad-10-blue)
+
 *This is an engineering project, not a product. The safety case, regulatory compliance, and airworthiness of any vehicle built from this material are the builder's sole responsibility.*
 
-The system is designed to provide:
-- High sample rate inertial measurement and state estimation
-- Real-time flight control
-- 6 PWM servo connectors, currently with 4 being used for canard-based active roll stabilisation
-- In flight data logging and optional in-flight telemetry
+The project is designed to demonstrate:
+- Configurable real-time control for an actively controlled rocket,
+- Adaptable connectors, including I2C, UART and 6 PWM connectors, currently with 4 being used for canard-based active roll stabilisation
+- In flight data logging and optional in-flight telemetry,
 
 This repository contains the hardware design, embedded software, simulation models, and analysis tools used during development.
+
+---
+
+## Specification
+
+%Words
 
 ---
 
@@ -40,6 +46,12 @@ This repository contains the hardware design, embedded software, simulation mode
 | System Integration              | ⏳ Not Started |
 | HITL Testing                    | ⏳ Not Started |
 | Flight Testing                  | ⏳ Not Started |
+
+---
+
+## System Architecture
+
+%Words
 
 ---
 
@@ -105,6 +117,10 @@ Front avionics assembly, WIP
 ## Flight Software
 
 %words
+
+---
+
+# Simulation
 
 ---
 
