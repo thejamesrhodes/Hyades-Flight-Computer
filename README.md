@@ -1,5 +1,5 @@
 <p align="center">
-<img src="images/Banner.png" width="884">
+<img src="Banner.png" width="884">
 </p>
 
 **Hyades Flight Computer**
