@@ -2,9 +2,14 @@
 <img src="Images/OpenRocket_1.png" width="884">
 </p>
 
+![Status](https://img.shields.io/badge/status-active%20development-orange)
+![MCU](https://img.shields.io/badge/MCU-STM32H743-blue)
+![MATLAB](https://img.shields.io/badge/MATLAB-R2025b-red)
+![KiCad](https://img.shields.io/badge/KiCad-10-blue)
+
 ---
 
-**Hyades Flight Computer**
+# Hyades Flight Computer
 
 Custom STM32H743 flight computer and GNC software for an actively roll-controlled high-power rocket.
 *This is an engineering project, not a product. The safety case, regulatory compliance, and airworthiness of any vehicle built from this material are the builder's sole responsibility.*
@@ -19,7 +24,7 @@ This repository contains the hardware design, embedded software, simulation mode
 
 ---
 
-**Project Progress**
+## Project Progress
 
 | Feature                         | Status |
 |---------------------------------|:------:|
@@ -38,7 +43,7 @@ This repository contains the hardware design, embedded software, simulation mode
 
 ---
 
-**Flight Computer Design**
+## Flight Computer Design
 
 The main PCB, containing all the computation and data gathering.
 
@@ -54,7 +59,7 @@ The PDB board, provides power and distributes PWM signals to the servos, as well
 
 ---
 
-**Flight Computer Testing**
+## Flight Computer Testing
 
 0 Ohm Series Termination vs 47 Ohm Series Termination for the 24Mhz HSE Oscillator, unnecessary? Yes, but a good opportunity to learn SPICE Simulations, plus it looks cool.
 
@@ -74,7 +79,7 @@ The schematic that the simulations where derived from.
 
 ---
 
-**Flight Hardware Design**
+## Flight Hardware Design
 
 Full assembly, front section and nose cone are missing in action.
 
@@ -91,31 +96,31 @@ Front avionics assembly, WIP
 
 ---
 
-**Flight Hardware Testing**
+## Flight Hardware Testing
 
 %words
 
 ---
 
-**Flight Software**
+## Flight Software
 
 %words
 
 ---
 
-**Simulink Roll Model**
+## Simulink Roll Model
 
 %words
 
 ---
 
-**Simulink 6DOF Model**
+## Simulink 6DOF Model
 
 %words
 
 ---
 
-**MATLAB Monte Carlo Analysis**
+## MATLAB Monte Carlo Analysis
 
 Demonstrating a <0.5s roll rate settling time for a step response with the current optimal gainset.
 
@@ -133,7 +138,7 @@ Visualises the correlation structures between convergent roll damping and the di
 
 ---
 
-**MATLAB Gain Optimisation**
+## MATLAB Gain Optimisation
 
 Heatmaps where each square is a n=400 montecarlo simulation at the corresponding proportional and integral gains plotted against some measure relevant to system performance (note gains are q normalised as follows: Kp = c/q  and  Ki = Kp*Ti, where q is dynamic pressure (Pa), c and Ti are the user configurable parameters.).
 
@@ -146,19 +151,19 @@ Heatmaps where each square is a n=400 montecarlo simulation at the corresponding
 
 ---
 
-**System Integration**
+## System Integration
 
 %words
 
 ---
 
-**HITL Testing**
+## HITL Testing
 
 %words
 
 ---
 
-**Flight Testing**
+## Flight Testing
 
 %words
 
