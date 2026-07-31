@@ -1,0 +1,3 @@
+﻿Input Transient
+Sim ID,Vout Maximum,Vout Minimum,Average Vout @Vin=8.4,Average Vout @Vin=7.0,Overshoot Settle Time,Undershoot Settle Time,Overshoot,Undershoot
+4,5.04 V,5.02 V,5.03 V,5.03 V,0.04 ms,0.04 ms,0.01 V,0.01 V
