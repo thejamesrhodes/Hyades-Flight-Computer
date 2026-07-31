@@ -1,0 +1,188 @@
+(kicad_sch
+	(version 20260306)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "83880827-9a9f-4745-987a-ee626b6d4723")
+	(paper "A4")
+	(title_block
+		(title "MCU Board 0.2")
+		(date "2026-07-04")
+		(rev "2")
+		(company "James Rhodes")
+	)
+	(lib_symbols)
+	(text "CONNECTORS\n"
+		(exclude_from_sim no)
+		(at 69.342 163.322 0)
+		(effects
+			(font
+				(size 5.08 5.08)
+			)
+		)
+		(uuid "18074456-b621-4420-9956-64935879a363")
+	)
+	(text "DATA COLLECTION\nPWR"
+		(exclude_from_sim no)
+		(at 230.632 69.342 0)
+		(effects
+			(font
+				(size 5.08 5.08)
+			)
+		)
+		(uuid "20bf5e77-c397-4090-997d-f95b0cbc9405")
+	)
+	(text "DATA PROCESSING"
+		(exclude_from_sim no)
+		(at 70.358 70.612 0)
+		(effects
+			(font
+				(size 5.08 5.08)
+			)
+		)
+		(uuid "d372a34e-c5f7-4385-8edb-f0f08c06decc")
+	)
+	(sheet
+		(at 20.32 134.62)
+		(size 101.6 57.15)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 1.27)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "5e3c5b8e-a597-4f64-acc1-3e04a910572f")
+		(property "Sheetname" "Connectors"
+			(at 20.32 133.3496 0)
+			(show_name yes)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Connectors.kicad_sch"
+			(at 20.32 192.9134 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "MCU Board 0.2"
+				(path "/83880827-9a9f-4745-987a-ee626b6d4723"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 180.34 19.05)
+		(size 99.06 105.41)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 1.27)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "aa88a3df-a001-4d7a-a573-31fe9f47be47")
+		(property "Sheetname" "Sensors and PWR"
+			(at 180.34 17.7796 0)
+			(show_name yes)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Sensors_PWR.kicad_sch"
+			(at 180.34 125.6034 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "MCU Board 0.2"
+				(path "/83880827-9a9f-4745-987a-ee626b6d4723"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 20.32 20.32)
+		(size 101.6 104.14)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 1.27)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "d1c7e1c4-7589-4d73-bd59-99f70d7abd57")
+		(property "Sheetname" "MCU"
+			(at 20.32 19.0496 0)
+			(show_name yes)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "MCU.kicad_sch"
+			(at 20.32 125.6034 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(instances
+			(project "MCU Board 0.2"
+				(path "/83880827-9a9f-4745-987a-ee626b6d4723"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)
