@@ -151,27 +151,15 @@ Front avionics assembly, WIP
 
 ## Roll Control Architecture
 
-The loop closes on roll rate, in two deliberately separated paths.
+The loop closes on roll rate, along two paths.
 
-**Damping.** A proportional rate damper, gain scheduled on dynamic pressure, `Kp = c / q_e`. The schedule holds the open-loop *crossover* constant, `wc = c*k_b` with `k_b = A*d*Cl_delta / Ixx`. Crossover is the right invariant to target rather than closed-loop bandwidth, because the open-loop roll pole `a = k_a*q/V` varies across the envelope by orders of magnitude wherever passive roll damping is strong. Active control earns its place at the low-q, high-V corner, where the airframe is close to undamped; at high q and low V it damps itself and the loop is near idle.
+**Damping** is proportional and gain scheduled on dynamic pressure, `Kp = c / q_e`. The 1/q schedule holds the open-loop crossover constant across the envelope.
 
-**Trim.** Proportional damping cannot reject a constant disturbance. The disturbance here is a standing roll moment `Cl_0` from fin cant, canard rigging error and body asymmetry. Adding an integrator to the damper is exactly what generates a limit cycle against the servo dead zone, so bias rejection is separated into a slow bounded trim path instead.
+**Trim** is a slow bounded integrator that cancels the standing roll moment `Cl_0` from fin cant and build asymmetry. It is kept out of the damper because the deflection that cancels a standing bias, `-Cl_0 / Cl_delta`, is independent of q and V - one fixed deflection works everywhere, so it can be learned slowly and stay clear of the loop dynamics. Four gates bound it: bandwidth, a dead zone subtracted from the integrator input, a saturation freeze, and a clamp with a rate limit. It accepts an external `Cl_0` estimate, so a future MEKF can supply the value directly.
 
-That separation is correct rather than a workaround, because the deflection which cancels a standing bias,
+Putting integral action in the damper instead produces a limit cycle against the servo dead zone. That dead zone sits inside the servo's own position loop, so command-side compensation does not reach it; dither on the command does. Flown at 1.5x the modelled dead zone, 125 Hz.
 
-`delta_ff = -Cl_0 / Cl_delta`
-
-is independent of dynamic pressure and airspeed: disturbance and control authority both scale with q, so one fixed deflection cancels the bias at every flight condition. It is a constant to be learned once, not a signal to be tracked. The trim path can therefore run an order of magnitude slower than the damper, and being that slow is what keeps it out of the loop dynamics.
-
-The trim integrator is bounded by four gates: a bandwidth set well below the stick-slip frequency; a dead zone *subtracted from* the integrator input rather than switching the integrator, so the integration rate falls smoothly to zero; a saturation freeze; and a clamp with a rate limit. Subtracting the band matters - a dead zone wrapped *around* an integrator is the same stick-slip generator at lower frequency. Low-pass filtering the error ahead of it adds phase lag and creates new hunting points.
-
-The path accepts an external `Cl_0` estimate, so a future MEKF can supply it directly while keeping the saturation and clamp gates. Without a canard position encoder an estimator cannot separate a genuine aerodynamic bias from actuator hang-off, so it needs the same bounding.
-
-**Dead zone and dither.** The servo dead zone, the command quantiser and gear lash together form a lattice, and whether the loop hunts depends on where the equilibrium deflection happens to land on it. This is the classic limit cycle of an integrating element driving an actuator with a dead band - the same pathology as valve stiction in process control, where the established cures are to remove the integrator, to add dither, or to fix the actuator.
-
-The dead zone sits inside the servo's *own* position loop, not on the command path, which is why command-side dead-zone compensation does not touch it. Dither does: injected on the command, it sweeps the servo's internal position error across the dead zone continuously and smears the threshold, and the second-order actuator attenuates it far too heavily at that frequency for the surface to follow. The flown setting is 1.5x the modelled dead zone at 125 Hz.
-
-**Known open defect.** The trim path's saturation gate tests the pre-dither command while the travel clamp acts on the post-dither command, so within one dither amplitude of the stop the gate can miss a saturation event. The fix is to include the dither amplitude in the gate threshold. It is not yet applied.
+**Open items.** The trim saturation gate tests the pre-dither command while the travel clamp acts post-dither, so it can miss a saturation event within one dither amplitude of the stop. The dither frequency also needs checking against the servo's maximum frame rate.
 
 ---
 
@@ -189,24 +177,20 @@ The dead zone sits inside the servo's *own* position loop, not on the command pa
 
 ## MATLAB Monte Carlo Analysis
 
-Each design point is evaluated over 400 dispersed runs. Aerodynamic coefficients, vehicle properties, actuator parameters and the disturbance bias are sampled per run. The controller's dynamic-pressure estimate is drawn about the *sampled* truth rather than the nominal - a 20% 1-sigma relative error on `q_e` multiplying the true `q` - so scheduling error compounds with aerodynamic dispersion the way it would in flight rather than cancelling against it.
+400 dispersed runs per design point. Aerodynamic coefficients, vehicle properties, actuator parameters and the disturbance bias are sampled per run. The controller's dynamic-pressure estimate is drawn about the *sampled* truth rather than the nominal, so scheduling error compounds with aerodynamic dispersion instead of cancelling against it.
 
-Scoring is in the rate domain, with transient and steady behaviour reported separately. The loop has a large, benign and physically unavoidable transient while the trim converges, during which the surface saturates, so a peak-over-the-whole-run metric reports "saturated" for every candidate design and tells you nothing about any of them.
+Scoring is in the rate domain, with transient and steady behaviour separated - the surface saturates during the transient while the trim converges, so whole-run peak metrics report "saturated" for every design.
 
 | Metric | Definition |
 |---|---|
 | `rms_err` | RMS of (p - ref) over the steady tail |
-| `bias` | mean(p) - ref over the tail; signed hang-off alone |
-| `ripple_pp` | max(p) - min(p) over the tail; limit-cycle amplitude alone |
-| `activity` | RMS surface rate; catches stick-slip, which no amplitude metric does |
+| `bias` | mean(p) - ref over the tail |
+| `ripple_pp` | max(p) - min(p) over the tail; limit-cycle amplitude |
+| `activity` | RMS surface rate; catches stick-slip |
 | `growth` | RMS of the last half of the tail over the first half; the stability test |
-| `travel_peak` / `travel_steady` | Fraction of mechanical travel used over the whole run / over the tail |
+| `travel_peak` / `travel_steady` | Travel used over the whole run / over the tail |
 
-`growth` rather than magnitude is the divergence test, because magnitude is dominated by the transient at high q whatever the gains are.
-
-Dither amplitude was swept over four campaigns at identical dispersion. Limit-cycle amplitude falls sharply between no dither and the flown setting, with no increase in surface activity - the hunting the dither removes was costing more motion than the dither adds. The residual cost appears as a small steady rate bias rather than as oscillation.
-
-An earlier peak-to-peak roll-*angle* metric has been withdrawn. It is the detrended integral of rate over the final 30% of the run and carries a resolution guard that cannot distinguish "has not converged" from "nothing is oscillating", so it is not a sound basis for a published figure.
+Dither amplitude was swept over four campaigns at matched dispersion. Limit-cycle amplitude falls sharply at the flown setting with no rise in surface activity; the cost shows up as a small steady rate bias. An earlier roll-*angle* ripple metric has been withdrawn as unsound.
 
 <!-- FIGURE SLOT A: settling-time and rate-error distributions, regenerated against
      the current canard geometry and the flown gainset. -->
@@ -217,26 +201,15 @@ An earlier peak-to-peak roll-*angle* metric has been withdrawn. It is the detren
 
 ## MATLAB Gain Optimisation
 
-The damping gain is parameterised as a dynamic-pressure-normalised constant, `Kp = c / q_e`, so that a single value of `c` holds the open-loop crossover constant across the flight envelope. `c` is set analytically from a crossover target of 4 Hz, placed below the actuator's natural frequency; the numerical job is then to confirm that stability margins around that value survive parameter uncertainty, not to search for an optimum.
+`c` is set analytically from a 4 Hz crossover target; the numerical work confirms the margins near it survive parameter uncertainty rather than searching for an optimum. Margins come from the open-loop frequency response with the transport delay treated exactly, evaluated over paired (q, V) flight conditions spanning q = 2-40 kPa, with independent +/-30% on `Cl_delta` and `Cl_p`, accepted at phase margin >= 35 deg, gain margin >= 6 dB and peak sensitivity <= 2.0 at the worst corner. Constants are read from the parameter file rather than restated here.
 
-Margins are evaluated directly from the open-loop frequency response, with the transport delay treated exactly rather than approximated, over:
+A separate grid search over `c` and the trim parameters scores candidates on settling time, hang-off, limit-cycle amplitude and actuator demand, using the Monte Carlo campaign at each point.
 
-- a set of *paired* (q, V) flight conditions taken along the trajectory, spanning q = 2-40 kPa
-- independent +/-30% variations on control effectiveness `Cl_delta` and roll damping `Cl_p`
-- acceptance at phase margin >= 35 deg, gain margin >= 6 dB and peak sensitivity <= 2.0, taken at the worst corner of that set
-
-Pairing the flight conditions rather than taking the outer product of a `q` list and a `V` list matters more than it sounds. Most of that outer product is not flyable - it implies air densities the vehicle never sees - and the corner that used to size the gain implied roughly 35 km of altitude. Sizing a controller against a condition the vehicle cannot reach costs real gain everywhere it can.
-
-Aerodynamic and actuator constants are derived from the single parameter file rather than restated in the optimiser, after an earlier version carried its own stale copy of `Cl_delta` and returned a schedule constant 2.25x too low as a result.
-
-A separate grid search over `c` and the trim parameters scores candidates on settling time, steady-state hang-off, limit-cycle amplitude and actuator demand, using the Monte Carlo campaign above at each grid point.
-
-`Ti` is retained only for the legacy PI mode kept in the model for A/B comparison. It has no effect in the flown configuration, where bias rejection comes from the bounded trim path rather than from integral action in the damper.
+`Ti` applies only to the legacy PI mode kept for A/B comparison.
 
 <!-- FIGURE SLOT C: stability-margin and failure-probability maps over c, regenerated
-     against the current canard. The previously published heatmaps swept c against Ti
-     for the legacy PI controller and the earlier canard geometry, and are not
-     representative of the flown loop. -->
+     against the current canard. The previously published heatmaps are from the legacy
+     PI controller and the earlier canard geometry. -->
 
 ---
 
