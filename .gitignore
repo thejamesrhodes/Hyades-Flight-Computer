@@ -33,6 +33,8 @@ __pycache__/
 
 # ---- Large personal media: delete this line to publish them ----
 **/Bonus Photos/
+# raw phone photos: commit cropped, resized copies instead
+**/IMG_[0-9]*.jpg
 
 # ---- OS / editor ----
 Thumbs.db

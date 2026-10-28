@@ -125,7 +125,17 @@ Below the schematic that the simulations were derived from.
 
 ## Flight Hardware Design
 
-Full assembly, front section and nose cone are missing in action.
+The built airframe, assembled and with the front avionics section separated from the booster.
+
+<p align="center">
+<img src="Documentation/Images/Hyades_Airframe_Assembled.jpg" width="884">
+</p>
+
+<p align="center">
+<img src="Documentation/Images/Hyades_Airframe_Separated.jpg" width="884">
+</p>
+
+CAD full assembly, an earlier render with the front section and nose cone missing.
 
 <p align="center">
 <img src="Documentation/Images/Full_Assembly.png" width="500">
