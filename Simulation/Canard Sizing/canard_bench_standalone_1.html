@@ -1,0 +1,1223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Canard Sizing Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#e9edf1; --surface:#ffffff; --panel:#e2e8ee; --panel-2:#d3dbe3; --grid:#dde4ea;
+  --ink-1:#0d1319; --ink-2:#52616e; --ink-3:#87949f; --line:#c9d3dc;
+  --accent:#0b63c4; --accent-soft:rgba(11,99,196,.16); --accent-ink:#ffffff;
+  --ok:#0d7f57; --warn:#a86c07; --bad:#bb3a2a; --tran:rgba(235,104,52,.13);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#c99400; --s5:#6b4bbd; --s6:#b02f2f;
+  --shadow:0 1px 2px rgba(13,19,25,.06),0 4px 14px rgba(13,19,25,.05);
+}
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
+  --ground:#0f1418; --surface:#161d23; --panel:#1c242c; --panel-2:#28323c; --grid:#242e37;
+  --ink-1:#eef3f7; --ink-2:#9aa8b4; --ink-3:#6d7c88; --line:#2c3742;
+  --accent:#4d9dee; --accent-soft:rgba(77,157,238,.20); --accent-ink:#0b1116;
+  --ok:#3bb98a; --warn:#d5a13a; --bad:#e2705f; --tran:rgba(235,104,52,.16);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#9085e9; --s6:#e66767;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.32);
+}}
+:root[data-theme="dark"]{
+  --ground:#0f1418; --surface:#161d23; --panel:#1c242c; --panel-2:#28323c; --grid:#242e37;
+  --ink-1:#eef3f7; --ink-2:#9aa8b4; --ink-3:#6d7c88; --line:#2c3742;
+  --accent:#4d9dee; --accent-soft:rgba(77,157,238,.20); --accent-ink:#0b1116;
+  --ok:#3bb98a; --warn:#d5a13a; --bad:#e2705f; --tran:rgba(235,104,52,.16);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#9085e9; --s6:#e66767;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.32);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink-1);
+  font:400 14px/1.5 "IBM Plex Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;text-wrap:balance}
+b{font-weight:600}
+.app{display:grid;grid-template-columns:322px minmax(0,1fr);min-height:100vh}
+
+/* ---- rail ---- */
+#rail{background:var(--surface);border-right:1px solid var(--line);padding:18px 16px 40px;
+  height:100vh;overflow-y:auto;position:sticky;top:0}
+.brand{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+.brand h1{font:600 16px/1.2 "IBM Plex Sans Condensed",sans-serif;letter-spacing:.01em}
+.brand span{font:500 10px/1 "IBM Plex Mono",monospace;color:var(--ink-3);
+  letter-spacing:.08em;text-transform:uppercase}
+.blurb{color:var(--ink-2);font-size:12px;line-height:1.45;margin:0 0 16px;
+  padding-bottom:14px;border-bottom:1px solid var(--line)}
+.group{margin-bottom:20px}
+.group h2{font:600 10px/1 "IBM Plex Sans Condensed",sans-serif;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:10px}
+.ctl{display:grid;grid-template-columns:1fr 74px;gap:2px 8px;align-items:center;margin-bottom:9px}
+.ctl label{font-size:12px;color:var(--ink-2);line-height:1.25}
+.ctl .u{color:var(--ink-3);font-family:"IBM Plex Mono",monospace;font-size:10px}
+.ctl .rng{grid-column:1/3;width:100%}
+input.num{font:500 12px/1 "IBM Plex Mono",monospace;color:var(--ink-1);background:var(--panel);
+  border:1px solid var(--line);border-radius:4px;padding:4px 5px;width:100%;
+  font-variant-numeric:tabular-nums;text-align:right}
+input.num:focus-visible,input.tin:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+input[type=range]{-webkit-appearance:none;appearance:none;height:16px;background:transparent}
+input[type=range]::-webkit-slider-runnable-track{height:3px;background:var(--panel-2);border-radius:2px}
+input[type=range]::-moz-range-track{height:3px;background:var(--panel-2);border-radius:2px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+  border-radius:50%;background:var(--accent);margin-top:-5px;border:2px solid var(--surface)}
+input[type=range]::-moz-range-thumb{width:13px;height:13px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--surface)}
+input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+button{font:500 12px/1 "IBM Plex Sans",sans-serif;cursor:pointer;border-radius:5px;
+  border:1px solid var(--line);background:var(--panel);color:var(--ink-1);padding:6px 11px}
+button:hover{background:var(--panel-2)}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.mini{font-size:10.5px;padding:3px 8px;color:var(--ink-3);background:transparent}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+
+/* ---- main ---- */
+main{min-width:0;padding:18px 22px 48px;display:flex;flex-direction:column;gap:16px}
+.readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px}
+.ro{background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:9px 11px;
+  box-shadow:var(--shadow)}
+.ro .k{font:600 9.5px/1 "IBM Plex Sans Condensed",sans-serif;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3)}
+.ro .v{font:600 21px/1.15 "IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  margin-top:5px;display:block}
+.ro .un{font-size:11px;color:var(--ink-3);font-weight:400}
+.ro.head{border-left:3px solid var(--accent)}
+.pill{display:inline-block;margin-top:5px;font:600 9.5px/1 "IBM Plex Sans Condensed",sans-serif;
+  letter-spacing:.09em;text-transform:uppercase;padding:3px 7px;border-radius:99px;color:#fff}
+.pill.ok{background:var(--ok)} .pill.warn{background:var(--warn)} .pill.bad{background:var(--bad)}
+#cap-line{font:400 12px/1.5 "IBM Plex Sans",sans-serif;color:var(--ink-2)}
+#cap-line b{font-family:"IBM Plex Mono",monospace;color:var(--ink-1);font-variant-numeric:tabular-nums}
+
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line)}
+.tab{background:none;border:none;border-bottom:2px solid transparent;border-radius:0;
+  padding:9px 13px;color:var(--ink-2);font-weight:500}
+.tab[aria-selected="true"]{color:var(--ink-1);border-bottom-color:var(--accent)}
+.tab:hover{background:var(--panel);color:var(--ink-1)}
+.pane{display:flex;flex-direction:column;gap:14px}
+.pane[hidden]{display:none}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+  box-shadow:var(--shadow);min-width:0}
+.card h3{font:600 10px/1 "IBM Plex Sans Condensed",sans-serif;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);margin-bottom:10px}
+.cols{display:grid;gap:14px}
+.c2{grid-template-columns:repeat(auto-fit,minmax(330px,1fr))}
+.c3{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+canvas{width:100%;display:block}
+.note{font-size:12px;line-height:1.55;color:var(--ink-2);margin-top:9px}
+.note b{color:var(--ink-1);font-family:"IBM Plex Mono",monospace}
+.legend{display:flex;flex-wrap:wrap;gap:5px 14px;margin-top:8px;
+  font:400 11px/1 "IBM Plex Sans",sans-serif;color:var(--ink-2)}
+.legend span{display:flex;align-items:center;gap:5px}
+.legend i{width:11px;height:11px;border-radius:2px;display:inline-block}
+
+table{border-collapse:collapse;width:100%;font:400 12px/1 "IBM Plex Mono",monospace;
+  font-variant-numeric:tabular-nums}
+.scroll{overflow-x:auto}
+th{font:600 9.5px/1.3 "IBM Plex Sans Condensed",sans-serif;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-3);text-align:right;padding:0 9px 7px;white-space:nowrap;
+  border-bottom:1px solid var(--line)}
+th:first-child{text-align:left}
+td{padding:6px 9px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--grid)}
+td:first-child{text-align:left;font-family:"IBM Plex Sans",sans-serif}
+tr.tran td{background:var(--tran)}
+td.flag{color:var(--bad);font-weight:600}
+#env-table td{padding:4px 5px;border-bottom:1px solid var(--grid)}
+#env-table td.ro{color:var(--ink-2)}
+input.tin{font:400 12px/1 "IBM Plex Mono",monospace;background:var(--panel);color:var(--ink-1);
+  border:1px solid transparent;border-radius:4px;padding:5px 6px;width:100%}
+input.tin.n{text-align:right;font-variant-numeric:tabular-nums}
+input.tin:hover{border-color:var(--line)}
+.row-x{padding:2px 8px;font-size:14px;line-height:1;color:var(--ink-3);background:transparent;
+  border-color:transparent}
+.row-x:hover{color:var(--bad);background:var(--panel)}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:11px}
+.seg{display:flex;gap:12px;align-items:center;font-size:12px;color:var(--ink-2)}
+.seg label{display:flex;align-items:center;gap:5px;cursor:pointer}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px;
+  overflow:auto;max-height:340px;font:400 11.5px/1.55 "IBM Plex Mono",monospace;color:var(--ink-2)}
+.spread{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+@media (max-width:900px){ .app{grid-template-columns:1fr} #rail{height:auto;position:static} }
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+</head>
+<body>
+<div class="app">
+<aside id="rail">
+  <div class="brand"><h1>Canard Sizing Bench</h1><span>v1</span></div>
+  <p class="blurb">Open-loop plant only — no control law, no gains, no closed-loop response.
+    Everything recomputes as you drag and is kept in this browser, so nothing resets.</p>
+</aside>
+
+<main>
+  <div class="readouts">
+    <div class="ro head" id="ro-score"><span class="k">worst margin</span><span class="v">–</span>
+      <span class="pill" id="ro-pill">–</span></div>
+    <div class="ro" id="ro-bind"><span class="k">binding</span><span class="v" style="font-size:14px">–</span></div>
+    <div class="ro" id="ro-area"><span class="k">panel area <span class="un">mm²</span></span><span class="v">–</span></div>
+    <div class="ro" id="ro-ar"><span class="k">effective AR</span><span class="v">–</span></div>
+    <div class="ro" id="ro-mac"><span class="k">MAC <span class="un">mm</span></span><span class="v">–</span></div>
+    <div class="ro" id="ro-mass"><span class="k">panel mass <span class="un">g</span></span><span class="v">–</span></div>
+  </div>
+  <div id="cap-line"></div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" data-p="margins" role="tab" aria-selected="true">Margins</button>
+    <button class="tab" data-p="map" role="tab" aria-selected="false">Sizing map</button>
+    <button class="tab" data-p="env" role="tab" aria-selected="false">Envelope</button>
+    <button class="tab" data-p="sweeps" role="tab" aria-selected="false">Sweeps</button>
+    <button class="tab" data-p="export" role="tab" aria-selected="false">Export</button>
+  </div>
+
+  <section class="pane" id="pane-margins">
+    <div class="cols c2">
+      <div class="card"><h3>Constraint margins</h3><canvas id="cv-margins"></canvas>
+        <p class="note">The shortest bar decides the design. Raise the linkage ratio before
+          changing the planform — it moves the error floor, torque and divergence together at no
+          aerodynamic cost — but watch the slew-rate margin, which falls as 1/n and is what
+          should stop you.</p>
+        <p class="note" id="margin-note"><b>Hover a bar</b> for what that margin is worth.
+          They are not all the same kind of thing: some are exact, one is a scaling law and
+          one is pure policy.</p></div>
+      <div class="card"><h3>Planform</h3><canvas id="cv-planform"></canvas></div>
+    </div>
+    <div class="card"><h3>Servo model, derived</h3><p class="note" id="servo-derived"></p></div>
+    <div class="card"><h3>Flight envelope results</h3>
+      <div class="scroll"><table id="res-table"></table></div>
+      <p class="note" id="table-note"></p></div>
+  </section>
+
+  <section class="pane" id="pane-map" hidden>
+    <div class="card">
+      <div class="spread"><h3 style="margin:0">Worst margin over the planform grid</h3>
+        <div class="seg"><label>grid <input id="map-res" type="range" min="9" max="41" step="2" value="21"
+            style="width:110px"><span id="map-res-v">21</span></label>
+          <button class="mini" id="map-best">jump to best</button></div></div>
+      <div class="cols c2" style="margin-top:10px">
+        <div><canvas id="cv-score"></canvas>
+          <div class="legend"><span>pale = low margin, deep = high; the white outline
+            encloses the feasible region. ○ best on grid, × current.</span></div></div>
+        <div><canvas id="cv-bind"></canvas><div class="legend" id="lg-bind"></div></div>
+      </div>
+      <p class="note" id="map-hover">—</p>
+      <p class="note">Click either map to move the design point there. Taper, sweep, t/c, hinge
+        line, linkage and the envelope stay as set in the rail — the grid varies span and root
+        chord only.</p>
+    </div>
+  </section>
+
+  <section class="pane" id="pane-env" hidden>
+    <div class="card">
+      <div class="spread"><h3 style="margin:0">Flight envelope</h3>
+        <div class="seg">
+          <label><input type="radio" name="envunit" value="V"> speed in m/s</label>
+          <label><input type="radio" name="envunit" value="M"> speed in Mach</label>
+          <button class="mini" id="env-add">+ add row</button>
+          <button class="mini" id="env-reset">reset</button></div></div>
+      <div class="scroll" style="margin-top:8px"><table id="env-table">
+        <thead><tr><th>point</th><th>altitude m</th><th>speed</th><th>Mach</th><th>q kPa</th><th></th></tr></thead>
+        <tbody id="env-body"></tbody></table></div>
+      <p class="note">Every margin is the worst case over these points, so the envelope decides
+        the answer as much as the geometry does. Keep a low-q point — rail exit is the only thing
+        sizing authority. Shaded rows sit inside the transonic exclusion band.</p>
+    </div>
+    <div class="cols c3">
+      <div class="card"><h3>Panel C_Nα</h3><canvas id="cv-cna"></canvas></div>
+      <div class="card"><h3>Roll forcing C_lδ</h3><canvas id="cv-cld"></canvas></div>
+      <div class="card"><h3>Hinge moment vs capability</h3><canvas id="cv-hinge"></canvas></div>
+    </div>
+    <p class="note" id="env-alt-note"></p>
+  </section>
+
+  <section class="pane" id="pane-sweeps" hidden>
+    <div class="cols c2">
+      <div class="card"><h3>Linkage ratio</h3><canvas id="cv-linkage"></canvas>
+        <div class="legend" id="lg-linkage"></div>
+        <p class="note">Log scale. Margins rise roughly linearly with n until authority takes
+          over from granularity — that knee is the ratio worth building.</p></div>
+      <div class="card"><h3>Bearing coupling</h3>
+        <canvas id="cv-bearing-tau"></canvas><canvas id="cv-bearing-lc"></canvas>
+        <p class="note">A free bearing (left) leaves the controlled forebody almost undamped in
+          roll — the plant pole approaches the origin and full deflection would run the body up to a
+          far higher steady rate. Seizing the bearing (right) hands the forebody the tail's damping
+          back. What that costs you in closed loop is a question for the MATLAB side; this only
+          shows the plant moving under you.</p></div>
+    </div>
+  </section>
+
+  <section class="pane" id="pane-export" hidden>
+    <div class="card">
+      <div class="spread"><h3 style="margin:0">Parameter set for the MATLAB loop</h3>
+        <div class="seg"><button class="primary" id="btn-dl">Download JSON</button>
+          <button id="btn-copy">Copy JSON</button>
+          <button class="mini" id="reset-all">reset everything</button></div></div>
+      <p class="note">C_lδ and C_lp are referenced to S_ref = πd²/4 and length d, with
+        p̂ = p·d/(2V). Points flagged transonic carry ±30 % and no sign-reversal model.</p>
+      <pre id="export-pre"></pre>
+    </div>
+  </section>
+</main>
+</div>
+
+<script type="module">
+/* canard plant model — direct port of canard_model.py.
+   Verified against the Python reference in reference.json (see test_physics.mjs). */
+const GAMMA = 1.4, R_AIR = 287.053, G0 = 9.80665;
+const TRANSONIC = [0.80, 1.20], TRANSONIC_BAND = 0.30;
+const DEG = Math.PI / 180;
+
+function isa(alt) {
+  let T, p;
+  if (alt < 11000) { T = 288.15 - 0.0065 * alt; p = 101325 * Math.pow(T / 288.15, -G0 / (-0.0065 * R_AIR)); }
+  else { T = 216.65; p = 22632.1 * Math.exp(-G0 * (alt - 11000) / (R_AIR * T)); }
+  const rho = p / (R_AIR * T);
+  return { T, p, rho, a: Math.sqrt(GAMMA * R_AIR * T) };
+}
+
+/* trapezoid over n samples of f on [0, L] — matches numpy.trapezoid with linspace */
+function trapz(f, L, n = 400) {
+  const h = L / (n - 1); let s = 0;
+  for (let i = 0; i < n; i++) s += f(i * h) * (i === 0 || i === n - 1 ? 0.5 : 1);
+  return s * h;
+}
+
+/* Blue Bird BMS-127WV+ manufacturer table: (V, stall N m, 60-deg time s). */
+const BMS127WV = { V: [3.7, 6.0, 7.4, 8.4],
+  T: [2.5, 4.0, 4.7, 5.3].map((x) => x * 9.80665e-2),
+  t60: [0.11, 0.07, 0.06, 0.05] };
+
+/* Separate slew from accel in a published 60-degree travel time by fitting
+   t60 = a/V + b.  `b` is the accel/decel overhead; it yields the true no-load
+   slew rate and the reflected output inertia. */
+function servoFromDatasheet(voltage, d = BMS127WV) {
+  const n = d.V.length;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { const x = 1 / d.V[i], y = d.t60[i];
+    sx += x; sy += y; sxx += x * x; sxy += x * y; }
+  const a = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+  const b = (sy - a * sx) / n;
+  const w0 = d.t60.map((t) => (60 * DEG) / (t - b));
+  let J = 0; for (let i = 0; i < n; i++) J += (b * d.T[i]) / (2 * w0[i]);
+  J /= n;
+  const interp = (arr) => {
+    if (voltage <= d.V[0]) return arr[0];
+    if (voltage >= d.V[n - 1]) return arr[n - 1];
+    let i = 0; while (d.V[i + 1] < voltage) i++;
+    const f = (voltage - d.V[i]) / (d.V[i + 1] - d.V[i]);
+    return arr[i] + f * (arr[i + 1] - arr[i]);
+  };
+  const T = interp(d.T);
+  return { stallTorque: T, rateNoload: interp(w0),
+           rateSpec: interp(d.t60.map((t) => (60 * DEG) / t)),
+           overheadS: b, JOut: J, alphaMax: T / J,
+           slewScaling: d.t60[0] / d.t60[n - 1],
+           slewPred: d.V[n - 1] / d.V[0],
+           inertiaPred: Math.sqrt(d.V[n - 1] / d.V[0]),
+           peakPower: (T * interp(w0)) / 4 };
+}
+
+function geom(c) {
+  const { span: s, rootChord: cr, tipChord: ct, sweepLeDeg: swle, thicknessRatio: tc, hingeFrac: hf } = c;
+  const area = 0.5 * (cr + ct) * s;
+  const taper = ct / cr;
+  /* Aspect ratio convention: "panel" = s^2/S_f (the exposed panel's own),
+     "image" = 2 s^2/S_f (mirrored in the body surface). They differ by 2x,
+     which is ~1.9x in C_Nalpha at AR ~ 1. Checked against Barrowman's closed
+     form for a fin set, "panel" lands within ~10% and "image" is ~107% high,
+     so "panel" is the default and it matches the Simulink plant function. */
+  const arBase = s * s / area;
+  const arEff = (c.arConvention === "image") ? 2 * arBase : arBase;
+  const mac = (2 / 3) * cr * (1 + taper + taper * taper) / (1 + taper);
+  const yCentroid = s * (cr + 2 * ct) / (3 * (cr + ct));
+  const dx = 0.5 * ct - 0.5 * cr;
+  const shc = Math.atan((s * Math.tan(swle * DEG) + dx) / s);
+  const chord = (xi) => cr + (ct - cr) * xi / s;
+  const J = trapz((xi) => {
+    const ch = chord(xi), xh = hf * ch, teq = 0.7 * tc * ch;
+    return c.materialDensity * teq * (Math.pow(ch - xh, 3) + Math.pow(xh, 3)) / 3;
+  }, s);
+  const mass = trapz((xi) => c.materialDensity * 0.7 * tc * chord(xi) * chord(xi), s);
+  const sDelta = trapz((xi) => {
+    const ch = chord(xi), xh = hf * ch, teq = 0.7 * tc * ch;
+    return c.materialDensity * teq * ch * (0.5 * ch - xh);
+  }, s);
+  return { area, taper, arEff, mac, yCentroid, shc, chord, J, mass, sDelta };
+}
+
+function cnAlpha(M, ar, shc = 0) {
+  const sub = (Mx) => {
+    const b2 = Math.max(1 - Mx * Mx, 1e-6);
+    return 2 * Math.PI * ar / (2 + Math.sqrt(4 + ar * ar * b2 * (1 + Math.pow(Math.tan(shc), 2) / b2)));
+  };
+  const sup = (Mx) => {
+    const b = Math.sqrt(Math.max(Mx * Mx - 1, 1e-9)), bar = b * ar;
+    if (bar >= 1) return (4 / b) * (1 - 1 / (2 * bar));
+    return (Math.PI * ar / 2) * (1 + (4 / Math.PI - 1) * bar);
+  };
+  if (M < TRANSONIC[0]) { const v = sub(M); return { v, lo: v * 0.9, hi: v * 1.1, transonic: false }; }
+  if (M > TRANSONIC[1]) { const v = sup(M); return { v, lo: v * 0.9, hi: v * 1.1, transonic: false }; }
+  const lo = sub(TRANSONIC[0]), hi = sup(TRANSONIC[1]);
+  const f = (M - TRANSONIC[0]) / (TRANSONIC[1] - TRANSONIC[0]);
+  const v = lo + f * (hi - lo);
+  return { v, lo: v * (1 - TRANSONIC_BAND), hi: v * (1 + TRANSONIC_BAND), transonic: true };
+}
+
+const xAcFrac = (M) => M < TRANSONIC[0] ? 0.25 : (M > TRANSONIC[1] ? 0.50
+  : 0.25 + 0.25 * (M - TRANSONIC[0]) / (TRANSONIC[1] - TRANSONIC[0]));
+
+const sRef = (veh) => 0.25 * Math.PI * veh.diameter * veh.diameter;
+const interference = (c, veh) => 1 + (0.5 * veh.diameter) / (c.span + 0.5 * veh.diameter);
+
+function rollDerivatives(c, veh, M) {
+  const G = geom(c);
+  const ca = cnAlpha(M, G.arEff, G.shc);
+  const a = ca.v * interference(c, veh);
+  const r = 0.5 * veh.diameter;
+  const cld = c.nFins * a * G.area * (r + G.yCentroid) / (sRef(veh) * veh.diameter);
+  const integ = trapz((xi) => G.chord(xi) * Math.pow(r + xi, 2), c.span);
+  const clp = -2 * c.nFins * a * integ / (sRef(veh) * veh.diameter * veh.diameter);
+  return { cld, clp, transonic: ca.transonic };
+}
+
+function hingeMoment(c, veh, M, q, delta) {
+  const G = geom(c), a = cnAlpha(M, G.arEff, G.shc).v * interference(c, veh);
+  return q * G.area * a * delta * (xAcFrac(M) - c.hingeFrac) * G.mac;
+}
+
+function qDivergence(c, veh, M, kDelta) {
+  const G = geom(c), a = cnAlpha(M, G.arEff, G.shc).v * interference(c, veh);
+  const arm = (xAcFrac(M) - c.hingeFrac) * G.mac;
+  return arm <= 0 ? Infinity : kDelta / (G.area * a * arm);
+}
+
+/* Describing function of backlash: |N|/K and phase [deg]. Unlike a dead zone
+   this is complex — backlash injects phase lag and is the nonlinearity that can
+   actually destabilise an otherwise stable loop. Reported as a flag only. */
+function backlashDf(ratio) {
+  if (!(ratio > 1)) return { mag: 0, phase: -90 };
+  const u = 1 - 2 / ratio;
+  const re = (1 / Math.PI) * (Math.PI / 2 + Math.asin(u) + u * Math.sqrt(Math.max(1 - u * u, 0)));
+  const im = -(4 / (Math.PI * ratio)) * (1 - 1 / ratio);
+  return { mag: Math.hypot(re, im), phase: Math.atan2(im, re) / DEG };
+}
+
+/* Crossover above which the transport delay alone eats more than
+   phaseBudgetDeg of phase margin. */
+function omegaCDelayCeiling(servo, phaseBudgetDeg) {
+  const tau = servo.delayS + 1 / servo.frameHz;
+  return tau > 0 ? (phaseBudgetDeg * DEG) / tau : Infinity;
+}
+
+function refer(servo, ratio) {
+  const n = ratio;
+  return {
+    torque: n * servo.stallTorque * servo.efficiency,
+    rate: servo.rateNoloadDeg * DEG / n,
+    deadband: servo.deadbandDeg * DEG / n,
+    resolution: servo.resolutionDeg * DEG / n,
+    backlash: servo.backlashDeg * DEG / n,
+    stiffness: n * n * servo.stiffness * servo.efficiency,
+  };
+}
+
+function availableRate(c, veh, M, q, delta, servo, ratio) {
+  const cap = refer(servo, ratio);
+  const load = Math.abs(hingeMoment(c, veh, M, q, delta));
+  const frac = cap.torque > 0 ? Math.min(load / cap.torque, 1) : 1;
+  return { rate: cap.rate * Math.max(1 - frac, 0), frac };
+}
+
+function rollPlant(c, veh, brg, M, q, V) {
+  const { cld, clp, transonic } = rollDerivatives(c, veh, M);
+  const k = q * sRef(veh) * veh.diameter;
+  const hd = veh.diameter / (2 * Math.max(V, 1e-6));
+  const dFore = k * (clp + veh.bodyClp) * hd, dTail = k * veh.finClp * hd, cb = brg.cVisc;
+  const A = [[(dFore - cb) / veh.IxxFore, cb / veh.IxxFore],
+             [cb / veh.IxxTail, (dTail - cb) / veh.IxxTail]];
+  const B0 = k * cld / veh.IxxFore;
+  const tr = A[0][0] + A[1][1], det = A[0][0] * A[1][1] - A[0][1] * A[1][0];
+  const disc = tr * tr - 4 * det;
+  let re1, re2;
+  if (disc >= 0) { const s = Math.sqrt(disc); re1 = (tr + s) / 2; re2 = (tr - s) / 2; }
+  else { re1 = re2 = tr / 2; }
+  // p_ss = solve(-A, B)  ->  first component
+  const pss = det !== 0 ? (-A[1][1] * B0) / det : Infinity;
+  const slow = (re1 < 0 && re2 < 0) ? Math.min(Math.abs(re1), Math.abs(re2)) : 0;
+  return { A, tauFore: slow > 0 ? 1 / slow : Infinity, pSsPerRad: pss,
+           cld, clp, pdotPerRad: B0, transonic, eig: [re1, re2] };
+}
+
+const MARGIN_KEYS = ["authority", "rate", "granularity", "torque",
+                            "divergence", "span", "static margin", "root bending"];
+
+function evaluate(c, veh, servo, ratio, brg, envelope, req) {
+  const cap = refer(servo, ratio), G = geom(c);
+  const dmax = req.deltaMaxDeg * DEG;
+  const MU = 1.79e-5;
+  const pts = [];
+  const JTotal = G.J + ratio * ratio * servo.JOut;
+  const clDistTail = veh.finCldelta * veh.finCantDeg * DEG;
+  const clDistCan = veh.canardRigErrorDeg * DEG;
+  let mAuth = Infinity, mRate = Infinity, mGran = Infinity, mTorque = Infinity,
+      mDiv = Infinity, mBend = Infinity, smWorst = Infinity;
+
+  for (const e of envelope) {
+    const at = isa(e.alt), V = e.V, M = V / at.a, q = 0.5 * at.rho * V * V;
+    const pl = rollPlant(c, veh, brg, M, q, V);
+    const cld = pl.cld;
+
+    const dTrim = brg.cVisc > 0 ? (cld > 0 ? clDistTail / cld + clDistCan : Infinity) : clDistCan;
+    const dMan = pl.pdotPerRad > 0 ? (req.pdotReqDeg * DEG) / pl.pdotPerRad : Infinity;
+    const dReq = dTrim + dMan;
+
+    const step = cap.deadband + cap.backlash;
+    const pdotGran = pl.pdotPerRad * step;
+    const pLc = pdotGran / req.omegaC;
+    const bHalf = 0.5 * cap.backlash;
+    const aOverB = bHalf > 0 ? Math.min(dReq, dmax) / bHalf : Infinity;
+    const bl = isFinite(aOverB) ? backlashDf(aOverB) : { mag: 1, phase: 0 };
+
+    const dRateReq = req.omegaC * Math.min(dMan, dmax);
+    const dAccelReq = req.omegaC * req.omegaC * Math.min(dMan, dmax);
+    const hDmax = hingeMoment(c, veh, M, q, dmax);
+    const tReqOp = Math.abs(hingeMoment(c, veh, M, q, Math.min(dReq, dmax))) + JTotal * dAccelReq;
+    const fracMax = cap.torque > 0 ? Math.min(Math.abs(hDmax) / cap.torque, 1) : 1;
+    const rateAvail = availableRate(c, veh, M, q, Math.min(dReq, dmax), servo, ratio).rate;
+    const qdiv = qDivergence(c, veh, M, cap.stiffness);
+
+    const aCn = cnAlpha(M, G.arEff, G.shc).v * interference(c, veh);
+    const mRoot = q * G.area * aCn * dmax * G.yCentroid;
+    const cnaCan = c.nFins * aCn * G.area / sRef(veh);
+    const cnaTot = cnaCan + veh.cnaRest;
+    const xCp = (veh.cnaRest * veh.xCpRest + cnaCan * veh.xCanard) / cnaTot;
+    const smCal = (xCp - veh.xCg) / veh.diameter;
+    const reC = at.rho * V * G.mac / MU;
+
+    mAuth = Math.min(mAuth, dReq > 0 ? dmax / dReq : Infinity);
+    mRate = Math.min(mRate, dRateReq > 0 ? rateAvail / dRateReq : Infinity);
+    mGran = Math.min(mGran, pLc > 0 ? (req.pFloorBudgetDeg * DEG) / pLc : Infinity);
+    mTorque = Math.min(mTorque, fracMax > 0 ? 1 / fracMax : Infinity);
+    mDiv = Math.min(mDiv, isFinite(qdiv) ? qdiv / (q * req.divMargin) : Infinity);
+    mBend = Math.min(mBend, mRoot > 0 ? req.mRootAllow / mRoot : Infinity);
+    smWorst = Math.min(smWorst, smCal);
+
+    pts.push({ name: e.name, M, q, V, cld, clp: pl.clp, pdotPerRad: pl.pdotPerRad,
+      pdotAtDmaxDeg: (pl.pdotPerRad * dmax) / DEG,
+      deltaTrimDeg: dTrim / DEG, deltaManDeg: dMan / DEG, deltaReqDeg: dReq / DEG,
+      pdotGranDeg: pdotGran / DEG, pFloorDeg: pLc / DEG,
+      backlashAOverB: aOverB, backlashPhaseLagDeg: bl.phase,
+      rateReqDeg: dRateReq / DEG, rateAvailDeg: rateAvail / DEG,
+      hingeNmAtDmax: hDmax, torqueReqOpNm: tReqOp, torqueFracAtDmax: fracMax,
+      mRootNm: mRoot, staticMarginCal: smCal, reynolds: reC,
+      qDivKPa: qdiv / 1000, tauFore: pl.tauFore,
+      pSsDegPerRad: pl.pSsPerRad / DEG, transonic: pl.transonic });
+  }
+
+  const margins = { authority: mAuth, rate: mRate, granularity: mGran, torque: mTorque,
+    divergence: mDiv, span: req.spanMax / c.span,
+    "static margin": smWorst / req.smMinCal, "root bending": mBend };
+  const score = Math.min(...Object.values(margins));
+  return { points: pts, margins, score, capability: cap, geometry: G, JTotal };
+}
+
+const DEFAULTS = {
+  canard: { span: 0.018, rootChord: 0.045, tipChord: 0.02925, sweepLeDeg: 25, thicknessRatio: 0.08,
+            hingeFrac: 0.20, nFins: 4, section: "smoothed hexagon", materialDensity: 1600,
+            arConvention: "panel" },
+  vehicle: { diameter: 0.062, IxxFore: 5.0e-4, IxxTail: 1.1e-4, finClp: -12.0, bodyClp: -0.15,
+             finCantDeg: 0.20, finCldelta: 8.0, canardRigErrorDeg: 0.15,
+             xCg: 0.700, xCanard: 0.260, xCpRest: 0.900, cnaRest: 22.0 },
+  servo: { stallTorque: 0.5198, rateNoloadDeg: 1355, deadbandDeg: 0.21, resolutionDeg: 0.029,
+           backlashDeg: 0.15, delayS: 0.006, frameHz: 250, stiffness: 30, efficiency: 0.85,
+           JOut: 6.76e-5 },
+  ratio: 4.0,
+  bearing: { cVisc: 0.02 },
+  req: { deltaMaxDeg: 12, pdotReqDeg: 500, pFloorBudgetDeg: 5, omegaC: 30, phaseBudgetDeg: 20,
+         divMargin: 2, spanMax: 0.030, smMinCal: 2.0, mRootAllow: 3.0 },
+  envelope: [ { name: "rail exit", alt: 200, V: 30 }, { name: "mid boost", alt: 500, V: 150 },
+              { name: "max q", alt: 1200, V: 270 }, { name: "burnout", alt: 2000, V: 310 },
+              { name: "coast", alt: 3000, V: 150 } ],
+};
+
+/* ---------------------------------------------------------------- state */
+const KEY = "canard-bench-v1";
+const clone = (o) => JSON.parse(JSON.stringify(o));
+let S;
+try { S = JSON.parse(localStorage.getItem(KEY)) || null; } catch (e) { S = null; }
+if (!S || !S.canard || !S.envelope) S = clone(DEFAULTS);
+for (const k of Object.keys(DEFAULTS)) if (S[k] === undefined) S[k] = clone(DEFAULTS[k]);
+let envUnit = S.envUnit || "V";
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ ...S, envUnit })); } catch (e) {} };
+
+/* --------------------------------------------------------------- controls */
+const CONTROLS = [
+  ["Planform", [
+    ["canard.span", "exposed semi-span", "mm", 1000, 4, 45, 0.5],
+    ["canard.rootChord", "root chord", "mm", 1000, 10, 95, 0.5],
+    ["canard.tipChord", "tip chord", "mm", 1000, 4, 95, 0.5],
+    ["canard.sweepLeDeg", "LE sweep", "°", 1, 0, 60, 1],
+    ["canard.thicknessRatio", "thickness t/c", "", 1, 0.03, 0.16, 0.005],
+    ["canard.hingeFrac", "hinge line x/c̄", "", 1, 0.05, 0.55, 0.01],
+    ["canard.nFins", "number of canards", "", 1, 2, 8, 1],
+  ]],
+  ["Linkage &amp; servo", [
+    ["ratio", "linkage ratio n", "", 1, 1, 10, 0.25],
+    ["servo.stallTorque", "stall torque", "N·m", 1, 0.05, 3, 0.01],
+    ["servo.rateNoloadDeg", "no-load rate", "°/s", 1, 100, 2000, 10],
+    ["servo.deadbandDeg", "deadband (shaft)", "°", 1, 0, 0.8, 0.01],
+    ["servo.backlashDeg", "backlash — measure", "°", 1, 0, 0.8, 0.01],
+    ["servo.stiffness", "stiffness K", "N·m/rad", 1, 1, 120, 1],
+    ["servo.delayS", "transport delay", "ms", 1000, 0, 40, 0.5],
+    ["servo.frameHz", "frame rate", "Hz", 1, 50, 1000, 10],
+    ["servo.efficiency", "linkage efficiency", "", 1, 0.4, 1, 0.01],
+  ]],
+  ["Vehicle", [
+    ["vehicle.diameter", "body diameter", "mm", 1000, 30, 150, 1],
+    ["vehicle.xCg", "CG from nose", "mm", 1000, 100, 2000, 5],
+    ["vehicle.xCanard", "canard ¼-MAC from nose", "mm", 1000, 20, 1500, 5],
+    ["vehicle.xCpRest", "CP of the rest from nose", "mm", 1000, 100, 2500, 5],
+    ["vehicle.cnaRest", "C_Nα of the rest (on S_ref)", "", 1, 3, 60, 0.5],
+    ["vehicle.finCantDeg", "residual tail fin cant", "°", 1, 0, 1.5, 0.01],
+    ["vehicle.finCldelta", "tail C_lδ per rad of cant", "", 1, 1, 30, 0.5],
+    ["vehicle.canardRigErrorDeg", "canard rigging error", "°", 1, 0, 1.0, 0.01],
+    ["vehicle.IxxFore", "forebody Iₓₓ", "g·m²", 1000, 0.1, 20, 0.05],
+    ["vehicle.IxxTail", "fin-can Iₓₓ", "g·m²", 1000, 0.02, 8, 0.02],
+    ["vehicle.finClp", "tail fin C_lp", "", 1, -40, -1, 0.5],
+    ["vehicle.bodyClp", "body C_lp", "", 1, -2, 0, 0.01],
+    ["bearing.cVisc", "bearing coupling c_visc", "N·m·s/rad", 1, 0, 5, 0.001, "log"],
+  ]],
+  ["Requirements", [
+    ["req.deltaMaxDeg", "max deflection", "°", 1, 3, 25, 0.5],
+    ["req.pdotReqDeg", "commandable roll accel", "°/s²", 1, 50, 4000, 25],
+    ["req.pFloorBudgetDeg", "residual roll-rate budget", "°/s", 1, 0.5, 40, 0.5],
+    ["req.omegaC", "closed-loop crossover ω_c — from MATLAB", "rad/s", 1, 5, 150, 1],
+    ["req.phaseBudgetDeg", "phase margin spent on delay", "°", 1, 5, 60, 1],
+    ["req.divMargin", "required q_div / q", "", 1, 1, 8, 0.25],
+    ["req.spanMax", "exposed span cap", "mm", 1000, 8, 60, 1],
+    ["req.smMinCal", "minimum static margin", "cal", 1, 0.5, 5, 0.1],
+    ["req.mRootAllow", "allowable root bending moment", "N·m", 1, 0.2, 20, 0.1],
+  ]],
+];
+
+const get = (p) => p.split(".").reduce((o, k) => o[k], S);
+const set = (p, v) => { const ks = p.split("."); const last = ks.pop();
+  ks.reduce((o, k) => o[k], S)[last] = v; };
+
+function buildRail() {
+  const rail = document.getElementById("rail");
+  CONTROLS.forEach(([title, rows], gi) => {
+    const g = document.createElement("section"); g.className = "group";
+    g.innerHTML = `<h2>${title}</h2>`;
+    rows.forEach(([path, label, unit, mul, lo, hi, step, scale]) => {
+      const row = document.createElement("div"); row.className = "ctl";
+      const id = path.replace(/\./g, "-");
+      row.innerHTML = `
+        <label for="${id}-n">${label}${unit ? ` <span class="u">${unit}</span>` : ""}</label>
+        <input class="num" id="${id}-n" type="number" step="${step}" min="${lo}" max="${hi}">
+        <input class="rng" id="${id}-r" type="range" min="${lo}" max="${hi}" step="${step}"
+               aria-label="${label}">`;
+      g.appendChild(row);
+      const num = row.querySelector(".num"), rng = row.querySelector(".rng");
+      const rd = () => { const v = get(path) * mul; num.value = +v.toFixed(4); rng.value = v; };
+      const wr = (v) => { v = Math.min(hi, Math.max(lo, +v)); set(path, v / mul); rd(); recompute(); save(); };
+      num.addEventListener("input", () => { if (num.value !== "") wr(num.value); });
+      rng.addEventListener("input", () => wr(rng.value));
+      row._read = rd; rd();
+    });
+    const rst = document.createElement("button"); rst.className = "mini"; rst.textContent = "reset section";
+    rst.onclick = () => { rows.forEach(([p]) => set(p, p.split(".").reduce((o, k) => o[k], DEFAULTS)));
+      readAll(); recompute(); save(); };
+    g.appendChild(rst);
+    rail.appendChild(g);
+  });
+}
+const readAll = () => document.querySelectorAll(".ctl").forEach((r) => r._read && r._read());
+
+/* -------------------------------------------------------------- envelope */
+function buildEnvelope() {
+  const tb = document.getElementById("env-body"); tb.innerHTML = "";
+  S.envelope.forEach((e, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><input class="tin" value="${e.name}"></td>
+      <td><input class="tin n" type="number" step="50" value="${+e.alt.toFixed(1)}"></td>
+      <td><input class="tin n" type="number" step="${envUnit === "V" ? 5 : 0.05}"
+           value="${envUnit === "V" ? +e.V.toFixed(1) : +(e.V / isa(e.alt).a).toFixed(3)}"></td>
+      <td class="ro mach"></td><td class="ro q"></td>
+      <td><button class="row-x" title="delete row">×</button></td>`;
+    const [nm, al, sp] = tr.querySelectorAll("input");
+    nm.oninput = () => { e.name = nm.value; recompute(); save(); };
+    al.oninput = () => { if (al.value !== "") { e.alt = +al.value; recompute(); save(); } };
+    sp.oninput = () => { if (sp.value === "") return;
+      e.V = envUnit === "V" ? +sp.value : +sp.value * isa(e.alt).a; recompute(); save(); };
+    tr.querySelector(".row-x").onclick = () => {
+      if (S.envelope.length <= 1) return;
+      S.envelope.splice(i, 1); buildEnvelope(); recompute(); save(); };
+    tb.appendChild(tr);
+  });
+}
+
+/* ---------------------------------------------------------------- charts */
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function setup(cv, hpx) {
+  const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = hpx;
+  cv.width = w * dpr; cv.height = h * dpr; cv.style.height = h + "px";
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h); return { g, w, h };
+}
+function niceTicks(lo, hi, n) {
+  const span = hi - lo; if (!(span > 0)) return [lo];
+  const mag = Math.pow(10, Math.floor(Math.log10(span / n)));
+  const norm = span / n / mag;
+  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag;
+  const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step)
+    out.push(+v.toPrecision(12));
+  return out;
+}
+/* measure the widest y tick and reserve room for it plus the rotated label */
+function margins(g, yr, ny, fy, ylab) {
+  g.font = '11px "IBM Plex Mono", monospace';
+  const ticks = niceTicks(yr[0], yr[1], ny || 4);
+  const wmax = Math.max(...ticks.map((v) => g.measureText(fy ? fy(v) : String(+v.toPrecision(4))).width));
+  return { l: Math.ceil(wmax) + 14 + (ylab ? 22 : 0), r: 12, t: 12, b: 34 };
+}
+function axes(g, w, h, m, xr, yr, xlab, ylab, opts = {}) {
+  const grid = css("--grid"), ink = css("--ink-3");
+  const X = (v) => m.l + (v - xr[0]) / (xr[1] - xr[0]) * (w - m.l - m.r);
+  const Y = (v) => h - m.b - (v - yr[0]) / (yr[1] - yr[0]) * (h - m.t - m.b);
+  g.font = '11px "IBM Plex Mono", monospace'; g.strokeStyle = grid; g.lineWidth = 1;
+  const xt = opts.xticks || niceTicks(xr[0], xr[1], opts.nx || 5);
+  const yt = opts.yticks || niceTicks(yr[0], yr[1], opts.ny || 4);
+  g.fillStyle = ink; g.textAlign = "center"; g.textBaseline = "top";
+  for (const v of xt) { const x = Math.round(X(v)) + .5;
+    if (!opts.nogrid) { g.beginPath(); g.moveTo(x, m.t); g.lineTo(x, h - m.b); g.stroke(); }
+    g.fillText(opts.fx ? opts.fx(v) : String(+v.toPrecision(4)), x, h - m.b + 6); }
+  g.textAlign = "right"; g.textBaseline = "middle";
+  for (const v of yt) { const y = Math.round(Y(v)) + .5;
+    if (!opts.nogrid) { g.beginPath(); g.moveTo(m.l, y); g.lineTo(w - m.r, y); g.stroke(); }
+    g.fillText(opts.fy ? opts.fy(v) : String(+v.toPrecision(4)), m.l - 8, y); }
+  g.textAlign = "center"; g.textBaseline = "bottom"; g.fillStyle = css("--ink-2");
+  g.font = '11px "IBM Plex Sans Condensed", sans-serif';
+  if (xlab) g.fillText(xlab, m.l + (w - m.l - m.r) / 2, h - 2);
+  if (ylab) { g.save(); g.translate(9, m.t + (h - m.t - m.b) / 2); g.rotate(-Math.PI / 2);
+    g.textBaseline = "top"; g.fillText(ylab, 0, 0); g.restore(); }
+  return { X, Y };
+}
+const line = (g, pts, col, lw = 2, dash = [], clip = null) => {
+  g.save();
+  if (clip) { g.beginPath(); g.rect(clip.x, clip.y, clip.w, clip.h); g.clip(); }
+  g.setLineDash(dash); g.strokeStyle = col; g.lineWidth = lw;
+  g.lineJoin = "round"; g.lineCap = "round"; g.beginPath();
+  pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.stroke(); g.restore();
+};
+const SER = () => [css("--s1"), css("--s2"), css("--s3"), css("--s4"), css("--s5"), css("--s6")];
+const statusColor = (m) => m >= 1.3 ? css("--ok") : m >= 1 ? css("--warn") : css("--bad");
+const MARGIN_LABELS = { authority: "authority", rate: "slew rate", granularity: "error floor",
+  torque: "torque limit", divergence: "divergence", span: "span (policy)",
+  "static margin": "static margin", "root bending": "root bending" };
+const MARGIN_NOTES = {
+  authority: "Exact given the disturbance model. δ_trim is q-independent — disturbance and control both scale with q — so only the manoeuvre part varies. Weak point: linear C_Nα out to δ_max, and no Reynolds correction at the low-q end where this binds.",
+  rate: "Demand ≈ ω_c · δ_manoeuvre. Scales as 1/n, so it is what should stop you raising the linkage ratio without limit.",
+  granularity: "Scaling law, not a bound. Rank with it; do not treat 1.0 as a pass mark.",
+  torque: "A limit check — can the servo hold δ_max at max q — not an operating condition. Normal operation uses a few percent. Inertia included as J = J_canard + n²·J_servo.",
+  divergence: "Static divergence about the hinge with a linear spring. Real stiffness is ~zero inside the deadband and high outside, so it is not one number. Binary flutter can occur below the divergence speed — check the mass balance and run a GVT.",
+  span: "Not a computed margin. It is the policy cap you set, standing in for canard–tail vortex interference, which is not semi-empirically predictable.",
+  "static margin": "Barrowman-style CP shift in calibres with the canards included. Only as good as x_cg, x_canard, x_cp_rest and C_Nα_rest.",
+  "root bending": "Panel root bending moment at δ_max against the allowable you set. Shaft torsion is the hinge moment — check both.",
+};
+
+/* --------------------------------------------------------------- compute */
+let R = null, MAP = null, mapReq = 0;
+
+function recompute() {
+  R = evaluate(S.canard, S.vehicle, S.servo, S.ratio, S.bearing, S.envelope, S.req);
+  paintReadouts(); paintEnvelopeRows(); render();
+  mapReq++; const my = mapReq;
+  requestAnimationFrame(() => { if (my === mapReq) { MAP = buildMap(); drawMaps(); } });
+}
+
+function paintReadouts() {
+  const worst = Object.entries(R.margins).sort((a, b) => a[1] - b[1])[0];
+  const set1 = (id, v, sub) => { const e = document.getElementById(id);
+    e.querySelector(".v").textContent = v; if (sub) e.querySelector(".k").textContent = sub; };
+  set1("ro-score", R.score.toFixed(2));
+  const pill = document.getElementById("ro-pill");
+  pill.textContent = R.score >= 1.3 ? "clear" : R.score >= 1 ? "marginal" : "infeasible";
+  pill.className = "pill " + (R.score >= 1.3 ? "ok" : R.score >= 1 ? "warn" : "bad");
+  set1("ro-bind", MARGIN_LABELS[worst[0]] || worst[0]);
+  set1("ro-area", (R.geometry.area * 1e6).toFixed(0));
+  set1("ro-ar", R.geometry.arEff.toFixed(2));
+  set1("ro-mac", (R.geometry.mac * 1e3).toFixed(1));
+  set1("ro-mass", (R.geometry.mass * 1e3).toFixed(2));
+  const cap = R.capability;
+  document.getElementById("cap-line").innerHTML =
+    `at the canard: <b>${(cap.torque).toFixed(2)}</b> N·m &nbsp;·&nbsp; ` +
+    `<b>${(cap.rate / DEG).toFixed(0)}</b> °/s &nbsp;·&nbsp; deadband+backlash ` +
+    `<b>${((cap.deadband + cap.backlash) / DEG).toFixed(3)}</b>° &nbsp;·&nbsp; ` +
+    `K<sub>δ</sub> <b>${cap.stiffness.toFixed(0)}</b> N·m/rad`;
+}
+
+function paintEnvelopeRows() {
+  const rows = document.querySelectorAll("#env-body tr");
+  R.points.forEach((p, i) => {
+    if (!rows[i]) return;
+    rows[i].querySelector(".mach").textContent = p.M.toFixed(3);
+    rows[i].querySelector(".q").textContent = (p.q / 1000).toFixed(2);
+    rows[i].classList.toggle("tran", p.transonic);
+  });
+}
+
+function buildMap() {
+  const N = +document.getElementById("map-res").value;
+  const sp = [], rt = [];
+  for (let i = 0; i < N; i++) sp.push(0.005 + (0.040 - 0.005) * i / (N - 1));
+  for (let j = 0; j < N; j++) rt.push(0.012 + (0.095 - 0.012) * j / (N - 1));
+  const score = [], bind = [], area = [];
+  const taper = S.canard.tipChord / S.canard.rootChord;
+  for (let i = 0; i < N; i++) {
+    score.push([]); bind.push([]); area.push([]);
+    for (let j = 0; j < N; j++) {
+      const c = { ...S.canard, span: sp[i], rootChord: rt[j], tipChord: taper * rt[j] };
+      const r = evaluate(c, S.vehicle, S.servo, S.ratio, S.bearing, S.envelope, S.req);
+      score[i].push(r.score); area[i].push(r.geometry.area * 1e6);
+      let bk = 0, bv = Infinity;
+      MARGIN_KEYS.forEach((k, ki) => { if (r.margins[k] < bv) { bv = r.margins[k]; bk = ki; } });
+      bind[i].push(bk);
+    }
+  }
+  let bi = 0, bj = 0;
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (score[i][j] > score[bi][bj]) { bi = i; bj = j; }
+  return { sp, rt, score, bind, area, N, best: [bi, bj] };
+}
+
+const RAMP = ["#0d366b", "#184f95", "#256abf", "#3987e5", "#6da7ec", "#9ec5f4", "#cde2fb"];
+function rampColor(t) { t = Math.max(0, Math.min(1, t));
+  return RAMP[RAMP.length - 1 - Math.round(t * (RAMP.length - 1))]; }
+
+function drawMaps() {
+  if (!MAP) return;
+  drawMap("cv-score", "score");
+  drawMap("cv-bind", "bind");
+}
+function drawMap(id, mode) {
+  const cv = document.getElementById(id); if (!cv || !cv.clientWidth) return;
+  const { g, w, h } = setup(cv, 310);
+  const { sp, rt, score, bind, N } = MAP;
+  const m = margins(g, [sp[0] * 1e3, sp[N - 1] * 1e3], 4, null, "y");
+  const x0 = rt[0] * 1e3, x1 = rt[N - 1] * 1e3, y0 = sp[0] * 1e3, y1 = sp[N - 1] * 1e3;
+  const pw = (w - m.l - m.r) / N, ph = (h - m.t - m.b) / N;
+  const cols = SER();
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    g.fillStyle = mode === "score" ? rampColor(Math.min(score[i][j], 2.5) / 2.5) : cols[bind[i][j]];
+    g.fillRect(m.l + j * pw, h - m.b - (i + 1) * ph, Math.ceil(pw) + .5, Math.ceil(ph) + .5);
+  }
+  if (mode === "score") {           // closed outline around the feasible region
+    const ok = (i, j) => i >= 0 && j >= 0 && i < N && j < N && score[i][j] >= 1;
+    g.save(); g.strokeStyle = "#ffffff"; g.lineWidth = 2.2; g.lineCap = "square";
+    g.beginPath();
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      if (!ok(i, j)) continue;
+      const L = m.l + j * pw, Rt = L + pw, B = h - m.b - i * ph, T = B - ph;
+      if (!ok(i, j - 1)) { g.moveTo(L, T); g.lineTo(L, B); }
+      if (!ok(i, j + 1)) { g.moveTo(Rt, T); g.lineTo(Rt, B); }
+      if (!ok(i - 1, j)) { g.moveTo(L, B); g.lineTo(Rt, B); }
+      if (!ok(i + 1, j)) { g.moveTo(L, T); g.lineTo(Rt, T); }
+    }
+    g.stroke(); g.restore();
+  }
+  const A = axes(g, w, h, m, [x0, x1], [y0, y1], "root chord  [mm]", "exposed semi-span  [mm]", { nx: 4, ny: 4, nogrid: true });
+  const mark = (x, y, sym) => { g.save(); g.strokeStyle = "#fff"; g.lineWidth = 2.4;
+    const X = A.X(x), Y = A.Y(y);
+    if (sym === "o") { g.beginPath(); g.arc(X, Y, 6, 0, 7); g.stroke(); }
+    else { g.beginPath(); g.moveTo(X - 6, Y - 6); g.lineTo(X + 6, Y + 6);
+           g.moveTo(X + 6, Y - 6); g.lineTo(X - 6, Y + 6); g.stroke(); } g.restore(); };
+  if (mode === "bind") {          // direct region labels — colour is not the only channel
+    const cx = {}, cy = {}, ct = {};
+    for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      const k = bind[i][j]; ct[k] = (ct[k] || 0) + 1;
+      cx[k] = (cx[k] || 0) + rt[j] * 1e3; cy[k] = (cy[k] || 0) + sp[i] * 1e3;
+    }
+    g.save(); g.font = '600 10px "IBM Plex Sans Condensed", sans-serif';
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.lineWidth = 3; g.lineJoin = "round";
+    for (const k of Object.keys(ct)) {
+      if (ct[k] < N * N * 0.035) continue;
+      const X = A.X(cx[k] / ct[k]), Y = A.Y(cy[k] / ct[k]);
+      const lab = MARGIN_LABELS[MARGIN_KEYS[k]] || MARGIN_KEYS[k];
+      g.strokeStyle = "rgba(0,0,0,.55)"; g.strokeText(lab, X, Y);
+      g.fillStyle = "#ffffff"; g.fillText(lab, X, Y);
+    }
+    g.restore();
+  }
+  mark(MAP.rt[MAP.best[1]] * 1e3, MAP.sp[MAP.best[0]] * 1e3, "o");
+  mark(S.canard.rootChord * 1e3, S.canard.span * 1e3, "x");
+  cv._axes = { A, m, w, h };
+}
+
+function mapHit(cv, ev) {
+  if (!MAP || !cv._axes) return null;
+  const r = cv.getBoundingClientRect();
+  const px = ev.clientX - r.left, py = ev.clientY - r.top;
+  const { m, w, h } = cv._axes, { N } = MAP;
+  const j = Math.floor((px - m.l) / ((w - m.l - m.r) / N));
+  const i = Math.floor((h - m.b - py) / ((h - m.t - m.b) / N));
+  if (i < 0 || j < 0 || i >= N || j >= N) return null;
+  return { i, j };
+}
+
+/* ---------------------------------------------------------------- render */
+function render() {
+  drawMargins(); drawPlanform(); drawTable(); drawEnvCharts(); drawSweeps(); drawExport();
+}
+
+function drawMargins() {
+  const cv = document.getElementById("cv-margins"); if (!cv.clientWidth) return;
+  const keys = MARGIN_KEYS, n = keys.length;
+  const { g, w, h } = setup(cv, 46 + n * 30);
+  const m = { l: 108, r: 60, t: 8, b: 40 }, XMAX = 3;
+  const X = (v) => m.l + Math.min(v, XMAX) / XMAX * (w - m.l - m.r);
+  const bh = 16, gap = (h - m.t - m.b - n * bh) / (n - 1 || 1);
+  g.font = '12px "IBM Plex Sans", sans-serif';
+  keys.forEach((k, i) => {
+    const v = R.margins[k], y = m.t + i * (bh + gap);
+    g.fillStyle = css("--panel-2"); g.fillRect(m.l, y, w - m.l - m.r, bh);
+    g.fillStyle = statusColor(v); g.fillRect(m.l, y, X(v) - m.l, bh);
+    g.fillStyle = css("--ink-2"); g.textAlign = "right"; g.textBaseline = "middle";
+    g.fillText(MARGIN_LABELS[k] || k, m.l - 10, y + bh / 2);
+    g.textAlign = "left"; g.fillStyle = css("--ink-1");
+    g.font = '12px "IBM Plex Mono", monospace';
+    g.fillText(isFinite(v) ? (v > 999 ? v.toExponential(1) : v.toFixed(2)) : "∞", w - m.r + 8, y + bh / 2);
+    g.font = '12px "IBM Plex Sans", sans-serif';
+  });
+  g.save(); g.strokeStyle = css("--ink-2"); g.setLineDash([4, 3]); g.lineWidth = 1.4;
+  g.beginPath(); g.moveTo(X(1), m.t - 2); g.lineTo(X(1), h - m.b + 2); g.stroke(); g.restore();
+  g.fillStyle = css("--ink-3"); g.textAlign = "center"; g.textBaseline = "top";
+  g.font = '11px "IBM Plex Mono", monospace';
+  g.fillText("1.0", X(1), h - m.b + 4);
+  g.fillText("normalised margin  (clipped at 3)", m.l + (w - m.l - m.r) / 2, h - m.b + 4 + 13);
+  cv._rows = keys.map((k, i) => ({ k, y0: m.t + i * (bh + gap), y1: m.t + i * (bh + gap) + bh }));
+}
+
+function drawPlanform() {
+  const cv = document.getElementById("cv-planform"); if (!cv.clientWidth) return;
+  const { g, w, h } = setup(cv, 210);
+  const c = S.canard, G = R.geometry, r0 = 0.5 * S.vehicle.diameter;
+  const xs = [0, c.span * Math.tan(c.sweepLeDeg * DEG), c.span * Math.tan(c.sweepLeDeg * DEG) + c.tipChord, c.rootChord];
+  const ys = [r0, r0 + c.span, r0 + c.span, r0];
+  const band = 0.010;                       // body shown as a 10 mm band, not full radius
+  const y0 = r0 - band;
+  const pad = 24, xmax = Math.max(...xs, c.rootChord) * 1.10, ymax = (c.span + band) * 1.22;
+  const k = Math.min((w - 2 * pad) / xmax, (h - 2 * pad) / ymax);
+  const X = (v) => pad + v * k, Y = (v) => h - pad - (v - y0) * k;
+  g.fillStyle = css("--panel-2"); g.fillRect(0, Y(r0), w, h - Y(r0));
+  g.fillStyle = css("--ink-3"); g.font = '10px "IBM Plex Sans Condensed", sans-serif';
+  g.textAlign = "left"; g.textBaseline = "top"; g.fillText("body surface", 6, Y(r0) + 4);
+  g.beginPath(); xs.forEach((x, i) => i ? g.lineTo(X(x), Y(ys[i])) : g.moveTo(X(x), Y(ys[i])));
+  g.closePath(); g.fillStyle = css("--accent-soft"); g.fill();
+  g.strokeStyle = css("--accent"); g.lineWidth = 2; g.stroke();
+  const xh0 = c.hingeFrac * c.rootChord;
+  const xh1 = c.span * Math.tan(c.sweepLeDeg * DEG) + c.hingeFrac * c.tipChord;
+  line(g, [[X(xh0), Y(r0)], [X(xh1), Y(r0 + c.span)]], css("--s2"), 2, [6, 3]);
+  g.fillStyle = css("--s2"); g.textAlign = "left"; g.textBaseline = "bottom";
+  g.font = '10px "IBM Plex Mono", monospace';
+  g.fillText("hinge " + c.hingeFrac.toFixed(2) + "c", X(xh1) + 5, Y(r0 + c.span) - 2);
+  g.fillStyle = css("--ink-3");
+  g.fillText(`${(c.span * 1e3).toFixed(1)} mm span · ${(G.area * 1e6).toFixed(0)} mm² · AR ${G.arEff.toFixed(2)}`,
+    6, h - 6);
+}
+
+const FMT = {
+  name: (p) => p.name, M: (p) => p.M.toFixed(3), q: (p) => (p.q / 1000).toFixed(2),
+  cld: (p) => p.cld.toFixed(3), clp: (p) => p.clp.toFixed(3),
+  deltaReqDeg: (p) => p.deltaReqDeg.toFixed(3), pdotAtDmaxDeg: (p) => p.pdotAtDmaxDeg.toFixed(0),
+  pFloorDeg: (p) => p.pFloorDeg.toFixed(2), hingeNmAtDmax: (p) => p.hingeNmAtDmax.toFixed(3),
+  deltaTrimDeg: (p) => p.deltaTrimDeg.toFixed(2), deltaManDeg: (p) => p.deltaManDeg.toFixed(2),
+  rateReqDeg: (p) => p.rateReqDeg.toFixed(0), mRootNm: (p) => p.mRootNm.toFixed(3),
+  staticMarginCal: (p) => p.staticMarginCal.toFixed(2),
+  reynolds: (p) => (p.reynolds/1000).toFixed(0) + "k",
+  backlashAOverB: (p) => isFinite(p.backlashAOverB) ? p.backlashAOverB.toFixed(1) : "∞",
+  backlashPhaseLagDeg: (p) => p.backlashPhaseLagDeg.toFixed(1),
+  torqueFracAtDmax: (p) => (100 * p.torqueFracAtDmax).toFixed(0) + "%",
+  rateAvailDeg: (p) => p.rateAvailDeg.toFixed(0),
+  qDivKPa: (p) => isFinite(p.qDivKPa) ? p.qDivKPa.toFixed(0) : "∞",
+  tauFore: (p) => isFinite(p.tauFore) ? p.tauFore.toFixed(3) : "∞",
+};
+const COLS = [["name", "point"], ["M", "M"], ["q", "q kPa"], ["cld", "C_lδ"], ["clp", "C_lp"],
+  ["deltaTrimDeg", "δ trim °"], ["deltaManDeg", "δ mano °"], ["deltaReqDeg", "δ req °"],
+  ["pFloorDeg", "error floor °/s"], ["backlashAOverB", "δ / lash"],
+  ["backlashPhaseLagDeg", "lash lag °"], ["rateReqDeg", "rate req °/s"],
+  ["rateAvailDeg", "rate avail °/s"], ["hingeNmAtDmax", "hinge N·m"],
+  ["torqueFracAtDmax", "torque used"], ["mRootNm", "root bend N·m"],
+  ["staticMarginCal", "SM cal"], ["reynolds", "Re"], ["qDivKPa", "q_div kPa"],
+  ["tauFore", "τ fore s"]];
+
+const geomJ = () => R.geometry.J;
+
+function drawTable() {
+  const t = document.getElementById("res-table");
+  const db = (R.capability.deadband + R.capability.backlash) / DEG;
+  t.innerHTML = `<thead><tr>${COLS.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead><tbody>` +
+    R.points.map((p) => `<tr class="${p.transonic ? "tran" : ""}">` +
+      COLS.map(([k]) => {
+        let cls = "";
+        if (k === "deltaReqDeg") cls = p.deltaReqDeg < db ? "flag" : "";
+        if (k === "pFloorDeg") cls = p.pFloorDeg > S.req.pFloorBudgetDeg ? "flag" : "";
+        if (k === "backlashPhaseLagDeg") cls = p.backlashPhaseLagDeg < -10 ? "flag" : "";
+        if (k === "reynolds") cls = p.reynolds < 1e5 ? "flag" : "";
+        if (k === "rateReqDeg") cls = p.rateReqDeg > 0.7*p.rateAvailDeg ? "flag" : "";
+        if (k === "staticMarginCal") cls = p.staticMarginCal < S.req.smMinCal ? "flag" : "";
+        if (k === "torqueFracAtDmax") cls = p.torqueFracAtDmax > 0.8 ? "flag" : "";
+        return `<td class="${cls}">${FMT[k](p)}</td>`;
+      }).join("") + "</tr>").join("") + "</tbody>";
+  const sd = servoFromDatasheet(8.4);
+  document.getElementById("servo-derived").innerHTML =
+    `Derived from the four published (V, stall torque, 60° time) points rather than the ` +
+    `headline figures. The 60° time scales as <b>${sd.slewScaling.toFixed(2)}</b> from 3.7 V to ` +
+    `8.4 V against <b>${sd.slewPred.toFixed(2)}</b> for a slew limit and ` +
+    `<b>${sd.inertiaPred.toFixed(2)}</b> for an inertia limit — so it is slew-limited, and ` +
+    `fitting t₆₀ = a/V + b separates a <b>${(sd.overheadS*1e3).toFixed(1)} ms</b> accel/decel ` +
+    `overhead. True no-load slew is <b>${(sd.rateNoload/DEG).toFixed(0)} °/s</b>, not the ` +
+    `${(sd.rateSpec/DEG).toFixed(0)} °/s the spec implies. The overhead also gives the ` +
+    `reflected output inertia, <b>J = ${sd.JOut.toExponential(2)}</b> kg·m² ` +
+    `(≈ ${(sd.JOut/geomJ()).toFixed(0)}× the panel's own hinge inertia), peak power ` +
+    `<b>${sd.peakPower.toFixed(2)} W</b>, max output acceleration ` +
+    `<b>${(sd.alphaMax/DEG/1000).toFixed(0)}k °/s²</b>.`;
+  const ceil = omegaCDelayCeiling(S.servo, S.req.phaseBudgetDeg);
+  const over = S.req.omegaC > ceil*1.01;
+  document.getElementById("table-note").innerHTML =
+    `Canard-referred deadband + backlash is <b>${db.toFixed(3)}°</b>. Highlighted δ req values ` +
+    `fall below it — there the loop sits inside the actuator's dead zone and the error floor, ` +
+    `not authority, is what matters. <b>δ / lash</b> below about 3 means backlash is eating ` +
+    `real phase margin (highlighted lag column) — that is a stability question for the MATLAB ` +
+    `side, not something this tool resolves. Shaded rows are inside the transonic exclusion band.` +
+    `<br><br>Error floor = ṗ granularity / ω_c, a <b>scaling law, not a limit-cycle amplitude</b>. ` +
+    `With ${S.req.phaseBudgetDeg.toFixed(0)}° of phase margin allowed for the ` +
+    `${(1000*(S.servo.delayS + 1/S.servo.frameHz)).toFixed(1)} ms loop delay, crossover is capped at ` +
+    `<b>${ceil.toFixed(0)} rad/s</b> (${(ceil/2/Math.PI).toFixed(1)} Hz)` +
+    (over ? ` — <span style="color:var(--bad)">ω_c is set above that ceiling, so this floor is optimistic</span>.`
+          : `; ω_c is set to ${S.req.omegaC.toFixed(0)} rad/s.`);
+}
+
+function drawEnvCharts() {
+  const alt = S.envelope.length ? S.envelope[Math.floor(S.envelope.length / 2)].alt : 1200;
+  const at = isa(alt);
+  const Ms = []; for (let i = 0; i <= 240; i++) Ms.push(0.05 + i * (2.2 - 0.05) / 240);
+  const G = R.geometry;
+  const cna = Ms.map((M) => cnAlpha(M, G.arEff, G.shc).v);
+  const cld = Ms.map((M) => rollDerivatives(S.canard, S.vehicle, M).cld);
+  const hm = Ms.map((M) => { const V = M * at.a, q = 0.5 * at.rho * V * V;
+    return hingeMoment(S.canard, S.vehicle, M, q, S.req.deltaMaxDeg * DEG); });
+
+  const band = (g, A, m, h) => { g.save(); g.fillStyle = css("--tran");
+    g.fillRect(A.X(TRANSONIC[0]), m.t, A.X(TRANSONIC[1]) - A.X(TRANSONIC[0]), h - m.t - m.b);
+    g.restore(); };
+
+  const plot = (id, ys, col, ylab, extra) => {
+    const cv = document.getElementById(id); if (!cv.clientWidth) return;
+    const { g, w, h } = setup(cv, 210);
+    let lo = Math.min(0, ...ys), hi = Math.max(...ys); if (hi === lo) hi = lo + 1;
+    const pad = 0.08 * (hi - lo); lo -= pad; hi += pad;
+    if (extra && extra.hline !== undefined) hi = Math.max(hi, extra.hline * 1.15);
+    const m = margins(g, [lo, hi], 4, null, ylab);
+    const A = axes(g, w, h, m, [Ms[0], Ms[Ms.length - 1]], [lo, hi], "Mach", ylab, { nx: 4 });
+    band(g, A, m, h);
+    if (extra && extra.hline !== undefined)
+      line(g, [[A.X(Ms[0]), A.Y(extra.hline)], [A.X(Ms[Ms.length - 1]), A.Y(extra.hline)]],
+        css("--s2"), 2, [6, 3]);
+    if (lo < 0 && hi > 0) line(g, [[m.l, A.Y(0)], [w - m.r, A.Y(0)]], css("--grid"), 1);
+    line(g, Ms.map((M, i) => [A.X(M), A.Y(ys[i])]), col, 2);
+    g.fillStyle = css("--ink-3"); g.font = '10px "IBM Plex Sans Condensed", sans-serif';
+    g.textAlign = "center"; g.textBaseline = "top";
+    g.fillText("not modelled", (A.X(TRANSONIC[0]) + A.X(TRANSONIC[1])) / 2, m.t + 3);
+    if (extra && extra.hlabel) { g.textAlign = "right"; g.fillStyle = css("--s2");
+      g.fillText(extra.hlabel, w - m.r - 4, A.Y(extra.hline) + 4); }
+  };
+  plot("cv-cna", cna, css("--s1"), "panel C_Nα  [/rad]");
+  plot("cv-cld", cld, css("--s3"), "C_lδ  [/rad]");
+  plot("cv-hinge", hm, css("--s4"), `hinge moment at δmax  [N·m]`,
+    { hline: R.capability.torque, hlabel: `available ${R.capability.torque.toFixed(2)} N·m` });
+  document.getElementById("env-alt-note").textContent =
+    `Swept at ${alt.toFixed(0)} m (the middle envelope row's altitude).`;
+}
+
+function drawSweeps() {
+  // linkage ratio
+  let cv = document.getElementById("cv-linkage");
+  if (cv && cv.clientWidth) {
+    const ns = []; for (let n = 1; n <= 10.001; n += 0.25) ns.push(n);
+    const series = MARGIN_KEYS.filter((k) => k !== "span" && k !== "static margin");
+    const data = ns.map((n) => evaluate(S.canard, S.vehicle, S.servo, n, S.bearing, S.envelope, S.req));
+    const { g, w, h } = setup(cv, 240);
+    const lg = (v) => Math.log10(Math.max(v, 1e-3));
+    const fy = (v) => { const x = Math.pow(10, v); return x >= 1 ? String(+x.toPrecision(3)) : x.toFixed(2); };
+    const m = margins(g, [-1, 2], 3, fy, "normalised margin");
+    const A = axes(g, w, h, m, [1, 10], [-1, 2], "linkage ratio n", "normalised margin",
+      { nx: 4, yticks: [-1, 0, 1, 2], fy });
+    line(g, [[m.l, A.Y(0)], [w - m.r, A.Y(0)]], css("--ink-3"), 1.4, [4, 3]);
+    const CLIP = { x: m.l, y: m.t, w: w - m.l - m.r, h: h - m.t - m.b };
+    series.forEach((k) => line(g, ns.map((n, ii) => [A.X(n), A.Y(lg(data[ii].margins[k]))]),
+      SER()[MARGIN_KEYS.indexOf(k)], 2, [], CLIP));
+    line(g, ns.map((n, ii) => [A.X(n), A.Y(lg(data[ii].score))]), css("--ink-1"), 2.6, [], CLIP);
+    line(g, [[A.X(S.ratio), m.t], [A.X(S.ratio), h - m.b]], css("--ink-3"), 1.2, [3, 3]);
+    const lgd = document.getElementById("lg-linkage");
+    lgd.innerHTML = series.map((k) =>
+      `<span><i style="background:${SER()[MARGIN_KEYS.indexOf(k)]}"></i>${MARGIN_LABELS[k] || k}</span>`).join("") +
+      `<span><i style="background:${css("--ink-1")}"></i>worst margin</span>`;
+  }
+  // bearing coupling — two panels; two different units never share one axis
+  const cbs = []; for (let e = -6; e <= 1.001; e += 0.15) cbs.push(Math.pow(10, e));
+  let cached = null;
+  const bearingData = () => {
+    if (cached) return cached;
+    const taus = [], lcs = [];
+    cbs.forEach((cb) => { const r = evaluate(S.canard, S.vehicle, S.servo, S.ratio,
+      { cVisc: cb }, S.envelope, S.req);
+      taus.push(Math.max(...r.points.map((p) => isFinite(p.tauFore) ? p.tauFore : 0)));
+      lcs.push(Math.max(...r.points.map((p) =>
+        Math.abs(p.pSsDegPerRad) * S.req.deltaMaxDeg * DEG))); });
+    cached = { taus, lcs }; return cached;
+  };
+  const bearPlot = (id, ys, col, ylab, showX) => {
+    const c2 = document.getElementById(id); if (!c2 || !c2.clientWidth) return;
+    const { g, w, h } = setup(c2, showX ? 150 : 128);
+    let hi = Math.max(...ys) * 1.1 || 1;
+    const m = margins(g, [0, hi], 3, null, ylab); if (!showX) m.b = 8;
+    const A = axes(g, w, h, m, [-6, 1], [0, hi], showX ? "log₁₀ c_visc  [N·m·s/rad]" : "", ylab,
+      { xticks: [-6, -5, -4, -3, -2, -1, 0, 1], ny: 3,
+        fx: (v) => showX ? "1e" + v.toFixed(0) : "" });
+    line(g, cbs.map((c, i) => [A.X(Math.log10(c)), A.Y(ys[i])]), col, 2, [],
+      { x: m.l, y: m.t, w: w - m.l - m.r, h: h - m.t - m.b });
+    const cur = Math.log10(Math.max(S.bearing.cVisc, 1e-6));
+    line(g, [[A.X(cur), m.t], [A.X(cur), h - m.b]], css("--ink-3"), 1.2, [3, 3]);
+    g.fillStyle = css("--ink-3"); g.font = '10px "IBM Plex Sans Condensed", sans-serif';
+    g.textAlign = "left"; g.textBaseline = "top";
+    if (!showX) { g.fillText("free bearing", m.l + 4, m.t + 2);
+      g.textAlign = "right"; g.fillText("seized", w - m.r - 4, m.t + 2); }
+  };
+  const bd = bearingData();
+  bearPlot("cv-bearing-tau", bd.taus, css("--s1"), "slowest forebody τ  [s]", false);
+  bearPlot("cv-bearing-lc", bd.lcs, css("--s2"), "worst p at δmax  [°/s]", true);
+}
+
+function drawExport() {
+  const payload = { generated: "canard sizing bench", canard: S.canard, vehicle: S.vehicle,
+    servo: S.servo, linkage: { ratio: S.ratio }, bearing: S.bearing, requirements: S.req,
+    envelope: S.envelope, capability: R.capability, geometry: R.geometry,
+    margins: R.margins, score: R.score, points: R.points,
+    note: "C_ldelta and C_lp referenced to S_ref = pi d^2/4 and length d, p_hat = p d / (2 V). " +
+          "transonic=true points carry +/-30% and no sign-reversal model." };
+  const txt = JSON.stringify(payload, null, 2);
+  document.getElementById("export-pre").textContent = txt;
+  const btn = document.getElementById("btn-dl");
+  btn.onclick = async () => {
+    const dl = (typeof claude !== "undefined" && claude.use) ? await claude.use("downloads") : null;
+    if (dl) {                                  // hosted viewer: save through the capability
+      try { await dl.save({ filename: "canard_plant.json", data: txt });
+            btn.textContent = "Saved"; }
+      catch (e) { btn.textContent = e && e.code === "declined" ? "Download JSON" : "Save failed"; }
+      setTimeout(() => (btn.textContent = "Download JSON"), 1800);
+      return;
+    }
+    const b = new Blob([txt], { type: "application/json" });   // local file: ordinary download
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b); a.download = "canard_plant.json"; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  document.getElementById("btn-copy").onclick = async () => {
+    const btn = document.getElementById("btn-copy");
+    try { await navigator.clipboard.writeText(txt); btn.textContent = "Copied"; }
+    catch (e) { btn.textContent = "Copy blocked — select the text below"; }
+    setTimeout(() => (btn.textContent = "Copy JSON"), 1800);
+  };
+}
+
+/* ------------------------------------------------------------------ wire */
+function wire() {
+  document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
+    document.querySelectorAll(".tab").forEach((x) => x.setAttribute("aria-selected", x === t));
+    document.querySelectorAll(".pane").forEach((p) => p.hidden = p.id !== "pane-" + t.dataset.p);
+    requestAnimationFrame(() => { render(); drawMaps(); });
+  });
+
+  document.getElementById("env-add").onclick = () => {
+    const last = S.envelope[S.envelope.length - 1] || { alt: 1000, V: 200 };
+    S.envelope.push({ name: "point " + (S.envelope.length + 1), alt: last.alt, V: last.V });
+    buildEnvelope(); recompute(); save();
+  };
+  document.getElementById("env-reset").onclick = () => {
+    S.envelope = clone(DEFAULTS.envelope); buildEnvelope(); recompute(); save(); };
+  document.querySelectorAll("input[name=envunit]").forEach((r) => r.onchange = () => {
+    envUnit = document.querySelector("input[name=envunit]:checked").value;
+    buildEnvelope(); recompute(); save(); });
+  document.querySelector(`input[name=envunit][value="${envUnit}"]`).checked = true;
+
+  document.getElementById("map-res").oninput = () => {
+    document.getElementById("map-res-v").textContent = document.getElementById("map-res").value;
+    MAP = buildMap(); drawMaps(); };
+
+  const mg = document.getElementById("cv-margins");
+  mg.addEventListener("mousemove", (e) => {
+    if (!mg._rows) return;
+    const rect = mg.getBoundingClientRect(); const y = e.clientY - rect.top;
+    const hit = mg._rows.find((r) => y >= r.y0 - 6 && y <= r.y1 + 6);
+    const el = document.getElementById("margin-note");
+    el.innerHTML = hit
+      ? `<b>${MARGIN_LABELS[hit.k]} = ${R.margins[hit.k].toFixed(2)}</b> — ${MARGIN_NOTES[hit.k]}`
+      : "<b>Hover a bar</b> for what that margin is worth. They are not all the same kind of "
+        + "thing: some are exact, one is a scaling law and one is pure policy.";
+  });
+
+  ["cv-score", "cv-bind"].forEach((id) => {
+    const cv = document.getElementById(id);
+    cv.addEventListener("mousemove", (e) => {
+      const hit = mapHit(cv, e); const out = document.getElementById("map-hover");
+      if (!hit) { out.textContent = "—"; return; }
+      const { i, j } = hit;
+      out.innerHTML = `span <b>${(MAP.sp[i] * 1e3).toFixed(1)}</b> mm · root ` +
+        `<b>${(MAP.rt[j] * 1e3).toFixed(1)}</b> mm · area <b>${MAP.area[i][j].toFixed(0)}</b> mm² · ` +
+        `worst margin <b>${MAP.score[i][j].toFixed(2)}</b> · binding: ` +
+        `<b>${MARGIN_KEYS[MAP.bind[i][j]]}</b>`;
+    });
+    cv.addEventListener("mouseleave", () => document.getElementById("map-hover").textContent = "—");
+    cv.addEventListener("click", (e) => {
+      const hit = mapHit(cv, e); if (!hit) return;
+      const taper = S.canard.tipChord / S.canard.rootChord;
+      S.canard.span = MAP.sp[hit.i]; S.canard.rootChord = MAP.rt[hit.j];
+      S.canard.tipChord = taper * S.canard.rootChord;
+      readAll(); recompute(); save();
+    });
+  });
+  document.getElementById("map-best").onclick = () => {
+    if (!MAP) return; const [i, j] = MAP.best;
+    const taper = S.canard.tipChord / S.canard.rootChord;
+    S.canard.span = MAP.sp[i]; S.canard.rootChord = MAP.rt[j];
+    S.canard.tipChord = taper * S.canard.rootChord;
+    readAll(); recompute(); save();
+  };
+  document.getElementById("reset-all").onclick = () => {
+    S = clone(DEFAULTS); envUnit = "V";
+    readAll(); buildEnvelope(); recompute(); save();
+    document.querySelector('input[name=envunit][value="V"]').checked = true;
+  };
+
+  const lgd = document.getElementById("lg-bind");
+  lgd.innerHTML = MARGIN_KEYS.map((k, i) =>
+    `<span><i style="background:${SER()[i]}"></i>${MARGIN_LABELS[k] || k}</span>`).join("");
+
+  let t; addEventListener("resize", () => { clearTimeout(t);
+    t = setTimeout(() => { render(); drawMaps(); }, 120); });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () =>
+    setTimeout(() => { render(); drawMaps(); }, 30));
+  new MutationObserver(() => setTimeout(() => { render(); drawMaps(); }, 30))
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+
+buildRail(); buildEnvelope(); wire(); recompute();
+requestAnimationFrame(() => { render(); MAP = buildMap(); drawMaps(); });
+
+</script>
+
+</body>
+</html>
