@@ -1,0 +1,40 @@
+# ---- KiCad ----
+*-backups/
+.history/
+.history_trim/
+~*.lck
+fp-info-cache
+*.kicad_prl
+_autosave-*
+*-bak
+*.bak
+
+# ---- SolidWorks lock files ----
+~$*
+
+# ---- MATLAB / Simulink build artefacts ----
+slprj/
+*.slxc
+*.asv
+*.autosave
+
+# ---- STM32CubeIDE build output ----
+Debug/
+Release/
+
+# ---- Python ----
+__pycache__/
+*.pyc
+
+# ---- Manual backup copies (git is the history) ----
+*.OLD
+*.OLD-*
+*.original
+
+# ---- Large personal media: delete this line to publish them ----
+Images/Bonus Photos/
+
+# ---- OS / editor ----
+Thumbs.db
+desktop.ini
+.obsidian/workspace*.json
