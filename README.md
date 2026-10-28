@@ -128,11 +128,19 @@ Below the schematic that the simulations were derived from.
 The second hardware iteration of the flight computer. The first failed due to many oversights and lack of basic knowledge.
 On this version, the MCU boots and runs, USB and PDB works completely. An incorrectly wired CS pin has caused a bus fault where the I2C bus thinks its SPI and so fails to communicate. Future redesign to address this and a number of other design/architecture level issues is in progress, enabled by kind sponsorship from JLCPCB. Also seen is the Sheppard PCB design for my research project, which served a dual purpose in allowing me to validate the layout and connections for all the critical components for the next iteration, such as the ICM-42688P IMU and STM32H743 MCU and controlled impedance USB-HS routing for high data rate logging.
 
+<p align="center">
+<img src="Documentation/Images/Avionics_Boards.jpg" width="450" alt="Bare boards">
+</p>
+
 ---
 
 ## Flight Hardware Design
 
 The built airframe, assembled and with the front avionics section separated from the booster.
+
+<p align="center">
+<img src="Documentation/Images/Avionics_Stack_With_Nose_Section.jpg" width="700" alt="Avionics stack beside the front section">
+</p>
 
 <p align="center">
 <img src="Documentation/Images/Hyades_Airframe_Assembled.jpg" width="884">
