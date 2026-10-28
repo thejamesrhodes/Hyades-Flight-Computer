@@ -1,5 +1,5 @@
 <p align="center">
-<img src="Images/OpenRocket_1.png" width="884">
+<img src="Documentation/Images/OpenRocket_1.png" width="884">
 </p>
 
 ---
@@ -70,16 +70,21 @@ This repository contains the hardware design, embedded software, simulation mode
 ```text
 Hyades-Flight-Computer
 │
+├── Documentation/
+│   └── Images/
 ├── Firmware/
+│   └── STM32IDE/
 ├── Hardware/
-│   ├── PDB/
-│   └── MCU Board/
-├── Simulation/
-│   ├── Buck Regulator/
-│   ├── HSE Clock/
-│   └── Roll Tuning/
-├── Images/
-└── Documentation/
+│   ├── 29mm Rocket/
+│   ├── Avionics Bay/
+│   ├── Canards/
+│   ├── Fin Can/
+│   └── PCB Designs/
+└── Simulation/
+    ├── Buck Regulator SPICE Simulation/
+    ├── Canard Sizing/
+    ├── HSE Clock SPICE Simulation/
+    └── Matlab Roll Tuning/
 ```
 
 ---
@@ -89,26 +94,29 @@ Hyades-Flight-Computer
 The main PCB, containing all the computation and data gathering.
 
 <p align="center">
-<img src="Images/PCB_MCU.png" width="500">
+<img src="Documentation/Images/PCB_MCU.png" width="500">
+</p>
+
+<p align="center"><i>Rev 0.2 render; rev 0.3 layout in progress.</i>
 </p>
 
 The PDB board, provides power and distributes PWM signals to the servos, as well as providing a clean 3V3 to the sensor board.
 
 <p align="center">
-<img src="Images/PCB_PDB.png" width="500">
+<img src="Documentation/Images/PCB_PDB_0.6.3.png" width="560">
 </p>
 
 ---
 
 ## Flight Computer Testing
 
-0 Ohm Series Termination vs 47 Ohm Series Termination for the 24Mhz HSE Oscillator, unnecessary? Yes, but a good opportunity to learn SPICE Simulations, plus it looks cool.
-Below the schematic that the simulations where derived from.
+0 Ohm Series Termination vs 47 Ohm Series Termination for the 24 MHz HSE Oscillator, unnecessary? Yes, but a good opportunity to learn SPICE Simulations, plus it looks cool.
+Below the schematic that the simulations were derived from.
 
 <p align="center">
-<img src="Simulation/HSE Clock SPICE Simulation/Figures/0 Ohm Series Termination Figure.png" width="300">
-<img src="Simulation/HSE Clock SPICE Simulation/Figures/47 Ohm Series Termination Figure.png" width="300">
-<img src="Simulation/HSE Clock SPICE Simulation/Figures/Schematic Figure.png" width="600">
+<img src="Simulation/HSE%20Clock%20SPICE%20Simulation/Figures/0%20Ohm%20Series%20Termination%20Figure.png" width="300">
+<img src="Simulation/HSE%20Clock%20SPICE%20Simulation/Figures/47%20Ohm%20Series%20Termination%20Figure.png" width="300">
+<img src="Simulation/HSE%20Clock%20SPICE%20Simulation/Figures/Schematic%20Figure.png" width="600">
 </p>
 
 
@@ -120,14 +128,21 @@ Below the schematic that the simulations where derived from.
 Full assembly, front section and nose cone are missing in action.
 
 <p align="center">
-<img src="Images/Full_Assembly.png" width="500">
+<img src="Documentation/Images/Full_Assembly.png" width="500">
 </p>
 
 Spinning Rear Fin Can designed to avoid the roll reversal phenomenon where upstream control surfaces tip vortices interact with the downstream fixed fins, causing a difficult to predict moment in the opposite direction.
-Front avionics assembly, WIP
+
 <p align="center">
-<img src="Images/Rear_Fin_Can_Assembly.png" width="300">
-<img src="Images/Front_Avionics_Assembly.png" width="300">
+<img src="Documentation/Images/Rear_Fin_Can_Assembly_Updated_1.png" width="380">
+<img src="Documentation/Images/Rear_Fin_Can_Assembly_Updated_2.png" width="290">
+</p>
+
+Front avionics assembly, WIP.
+
+<p align="center">
+<img src="Documentation/Images/Front_Avionics_Assembly_Updated_1.png" width="250">
+<img src="Documentation/Images/Front_Avionics_Assembly_Updated_2.png" width="240">
 </p>
 
 ---
