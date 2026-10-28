@@ -6693,7 +6693,7 @@
 	(footprint "JLCImport:IHLP2525CZER1R0M01"
 		(layer "F.Cu")
 		(uuid "79afb1f6-02c7-41fe-87a0-520f298f19ab")
-		(at 149.999872 96.5 180)
+		(at 149.999872 96.5)
 		(descr "11A 1uH 22A 7.6mΩ ±20% SMD,6.9x6.5mm Power Inductors ROHS")
 		(tags "C845018 IHLP2525CZER1R0M01 IND-SMD_L6.5-W6.5_IHLP-2525 Vishay Intertech")
 		(property "Reference" "U2"
@@ -6755,7 +6755,7 @@
 			)
 		)
 		(property "Manufacturer" "Vishay Intertech"
-			(at 0 0 180)
+			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
@@ -6768,7 +6768,7 @@
 			)
 		)
 		(property "Manufacturer Part" "IHLP2525CZER1R0M01"
-			(at 0 0 180)
+			(at 0 0 0)
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
@@ -6792,44 +6792,14 @@
 		(attr smd)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
-			(start 3.25 3.25)
-			(end -3.25 3.25)
+			(start -3.25 -3.25)
+			(end 3.25 -3.25)
 			(stroke
 				(width 0.254)
 				(type solid)
 			)
 			(layer "F.SilkS")
-			(uuid "4c3bfbcb-a4c2-47a5-9646-7f0770cfb785")
-		)
-		(fp_line
-			(start 3.25 1.946147)
-			(end 3.25 3.25)
-			(stroke
-				(width 0.254)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "0264fd97-fdde-4cab-bb5c-859bae09cb8a")
-		)
-		(fp_line
-			(start 3.25 -3.25)
-			(end 3.25 -1.946147)
-			(stroke
-				(width 0.254)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "9cb1ae42-53e0-4186-9097-d36a436c4b2b")
-		)
-		(fp_line
-			(start -3.25 3.25)
-			(end -3.25 1.946147)
-			(stroke
-				(width 0.254)
-				(type solid)
-			)
-			(layer "F.SilkS")
-			(uuid "ce973c97-ac5a-490a-a318-75eab4c0c0cb")
+			(uuid "1cbd2382-c75c-40d8-9577-a5d1e575216f")
 		)
 		(fp_line
 			(start -3.25 -1.946147)
@@ -6842,17 +6812,47 @@
 			(uuid "3b2bc0df-1eff-4c9d-9417-3a54decd1233")
 		)
 		(fp_line
-			(start -3.25 -3.25)
-			(end 3.25 -3.25)
+			(start -3.25 3.25)
+			(end -3.25 1.946147)
 			(stroke
 				(width 0.254)
 				(type solid)
 			)
 			(layer "F.SilkS")
-			(uuid "1cbd2382-c75c-40d8-9577-a5d1e575216f")
+			(uuid "ce973c97-ac5a-490a-a318-75eab4c0c0cb")
+		)
+		(fp_line
+			(start 3.25 -3.25)
+			(end 3.25 -1.946147)
+			(stroke
+				(width 0.254)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "9cb1ae42-53e0-4186-9097-d36a436c4b2b")
+		)
+		(fp_line
+			(start 3.25 1.946147)
+			(end 3.25 3.25)
+			(stroke
+				(width 0.254)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "0264fd97-fdde-4cab-bb5c-859bae09cb8a")
+		)
+		(fp_line
+			(start 3.25 3.25)
+			(end -3.25 3.25)
+			(stroke
+				(width 0.254)
+				(type solid)
+			)
+			(layer "F.SilkS")
+			(uuid "4c3bfbcb-a4c2-47a5-9646-7f0770cfb785")
 		)
 		(pad "1" smd rect
-			(at -2.924505 0 180)
+			(at -2.924505 0)
 			(size 2.42 3.43)
 			(layers "F.Cu" "F.Mask" "F.Paste")
 			(net "/SW")
@@ -6861,7 +6861,7 @@
 			(uuid "4b63156a-434a-44ed-8abf-eac8d79a284c")
 		)
 		(pad "2" smd rect
-			(at 2.924606 0 180)
+			(at 2.924606 0)
 			(size 2.42 3.43)
 			(layers "F.Cu" "F.Mask" "F.Paste")
 			(net "+5V")
