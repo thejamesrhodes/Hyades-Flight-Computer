@@ -51,18 +51,17 @@ This repository contains the hardware design, embedded software, simulation mode
 
 | Feature                         | Status |
 |---------------------------------|:------:|
-| Flight Computer Design          | ✅ Complete |
-| Flight Computer Testing         | 🚧 In Progress |
-| Flight Software                 | 🚧 In Progress |
-| Flight Hardware Design          | 🚧 In Progress |
-| Flight Hardware Testing         | 🚧 In Progress |
-| Simulink Roll Model             | ✅ Complete |
-| Simulink 6DOF Model             | ✅ Complete |
-| MATLAB Monte Carlo Analysis     | 🚧 In Progress |
-| MATLAB Gain Optimisation        | 🚧 In Progress |
-| System Integration              | ⏳ Not Started |
-| HITL Testing                    | ⏳ Not Started |
-| Flight Testing                  | ⏳ Not Started |
+| Flight Computer Design          | Complete |
+| Flight Computer Testing         | In Progress |
+| Flight Software                 | In Progress |
+| Flight Hardware Design          | In Progress |
+| Flight Hardware Testing         | In Progress |
+| Simulink Roll Model             | Complete |
+| Simulink 6DOF Model             | Complete |
+| MATLAB Monte Carlo Analysis     | Complete |
+| System Integration              | Not Started |
+| HITL Testing                    | Not Started |
+| Flight Testing                  | Not Started |
 
 ---
 
@@ -177,9 +176,7 @@ Putting integral action in the damper instead produces a limit cycle against the
 
 ## MATLAB Monte Carlo Analysis
 
-400 dispersed runs per design point. Aerodynamic coefficients, vehicle properties, actuator parameters and the disturbance bias are sampled per run. The controller's dynamic-pressure estimate is drawn about the *sampled* truth rather than the nominal, so scheduling error compounds with aerodynamic dispersion instead of cancelling against it.
-
-Scoring is in the rate domain, with transient and steady behaviour separated - the surface saturates during the transient while the trim converges, so whole-run peak metrics report "saturated" for every design.
+400 dispersed runs per design point. Aerodynamic coefficients, vehicle properties, actuator parameters and the disturbance bias are sampled per run. The controller's dynamic-pressure estimate is drawn about the sampled truth rather than the nominal, so scheduling error compounds with aerodynamic dispersion instead of cancelling against it.
 
 | Metric | Definition |
 |---|---|
@@ -190,7 +187,7 @@ Scoring is in the rate domain, with transient and steady behaviour separated - t
 | `growth` | RMS of the last half of the tail over the first half; the stability test |
 | `travel_peak` / `travel_steady` | Travel used over the whole run / over the tail |
 
-Dither amplitude was swept over four campaigns at matched dispersion. Limit-cycle amplitude falls sharply at the flown setting with no rise in surface activity; the cost shows up as a small steady rate bias. An earlier roll-*angle* ripple metric has been withdrawn as unsound.
+Dither amplitude was swept over four campaigns at matched dispersion. Limit-cycle amplitude falls sharply at the flown setting with no rise in surface activity; the cost shows up as a small steady rate bias.
 
 <!-- FIGURE SLOT A: settling-time and rate-error distributions, regenerated against
      the current canard geometry and the flown gainset. -->
