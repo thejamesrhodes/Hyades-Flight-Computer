@@ -106,10 +106,6 @@ The PDB board, provides power and distributes PWM signals to the servos, as well
 <img src="Documentation/Images/PCB_PDB_0.6.3.png" width="560">
 </p>
 
----
-
-## Flight Computer Testing
-
 0 Ohm Series Termination vs 47 Ohm Series Termination for the 24 MHz HSE Oscillator, unnecessary? Yes, but a good opportunity to learn SPICE Simulations, plus it looks cool.
 Below the schematic that the simulations were derived from.
 
@@ -119,7 +115,18 @@ Below the schematic that the simulations were derived from.
 <img src="Simulation/HSE%20Clock%20SPICE%20Simulation/Figures/Schematic%20Figure.png" width="600">
 </p>
 
+---
 
+## Flight Computer Testing
+
+<p align="center">
+<img src="Documentation/Images/Avionics_Stack_Top.jpg" width="334" alt="Avionics stack, top view">
+<img src="Documentation/Images/Avionics_Stack_Side.jpg" width="253" alt="Avionics stack, side view">
+<img src="Documentation/Images/Avionics_Stack_Powered.jpg" width="245" alt="Avionics stack powered">
+</p>
+
+The second hardware iteration of the flight computer. The first failed due to many oversights and lack of basic knowledge.
+On this version, the MCU boots and runs, USB and PDB works completely. An incorrectly wired CS pin has caused a bus fault where the I2C bus thinks its SPI and so fails to communicate. Future redesign to address this and a number of other design/architecture level issues is in progress, enabled by kind sponsorship from JLCPCB. Also seen is the Sheppard PCB design for my research project, which served a dual purpose in allowing me to validate the layout and connections for all the critical components for the next iteration, such as the ICM-42688P IMU and STM32H743 MCU and controlled impedance USB-HS routing for high data rate logging.
 
 ---
 
