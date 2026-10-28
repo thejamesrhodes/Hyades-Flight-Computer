@@ -51,18 +51,17 @@ This repository contains the hardware design, embedded software, simulation mode
 
 | Feature                         | Status |
 |---------------------------------|:------:|
-| Flight Computer Design          | ✅ Complete |
-| Flight Computer Testing         | 🚧 In Progress |
-| Flight Software                 | 🚧 In Progress |
-| Flight Hardware Design          | 🚧 In Progress |
-| Flight Hardware Testing         | 🚧 In Progress |
-| Simulink Roll Model             | ✅ Complete |
-| Simulink 6DOF Model             | ✅ Complete |
-| MATLAB Monte Carlo Analysis     | 🚧 In Progress |
-| MATLAB Gain Optimisation        | 🚧 In Progress |
-| System Integration              | ⏳ Not Started |
-| HITL Testing                    | ⏳ Not Started |
-| Flight Testing                  | ⏳ Not Started |
+| Flight Computer Design          | Complete |
+| Flight Computer Testing         | In Progress |
+| Flight Software                 | In Progress |
+| Flight Hardware Design          | In Progress |
+| Flight Hardware Testing         | In Progress |
+| Simulink Roll Model             | Complete |
+| Simulink 6DOF Model             | Complete |
+| MATLAB Monte Carlo Analysis     | Complete |
+| System Integration              | Not Started |
+| HITL Testing                    | Not Started |
+| Flight Testing                  | Not Started |
 
 ---
 
