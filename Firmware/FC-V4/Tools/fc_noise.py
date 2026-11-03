@@ -48,6 +48,16 @@ import numpy as np
 D2R = math.pi / 180.0
 G0 = 9.80665
 REC = struct.Struct("<Ih3h3h")             # telemetry.h MSG_IMU payload (18 B)
+# Below ~0.1 s the sensor's own LPF (13.37 % ODR, ~30 Hz) correlates successive
+# samples: the ADEV rises to a hump at ~20 ms instead of following tau^-1/2.
+# That region is the filter, not the noise model, so it is excluded from the
+# white-level read-out and from the fit; and a Gauss-Markov term is only
+# allowed time constants >= GM_T_MIN, so it cannot absorb the LPF hump (which
+# would turn into an absurd bias random walk).
+TAU_MIN_FIT = 0.1          # s
+TAU_WHITE_MAX = 1.0        # s, upper end of the white-noise read-out
+GM_T_MIN = 1.0             # s
+TAU_ENV_MIN = 100.0        # s, start of the long-tau envelope for Q_BIAS
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +143,7 @@ def model_avar(theta, tau, fs, terms):
         elif t == "RW":
             out += math.exp(theta[i]) * tau / 3.0; i += 1
         elif t == "GM":
-            s2, T = math.exp(theta[i]), math.exp(theta[i + 1]); i += 2
+            s2, T = math.exp(theta[i]), GM_T_MIN + math.exp(theta[i + 1]); i += 2
             out += avar_gm(m, s2, math.exp(-1.0 / (T * fs)))
     return out
 
@@ -186,7 +196,7 @@ def fit(tau, av, ne, fs, terms):
             th0.append(math.log(max(av[-1] * 3.0 / tau[-1], 1e-30)))
         elif t == "GM":
             k = int(np.argmin(av * 0 + np.abs(np.log(tau) - np.log(tau[len(tau) // 2]))))
-            th0 += [math.log(av[k] * 2.0), math.log(tau[k])]
+            th0 += [math.log(av[k] * 2.0), math.log(max(tau[k] - GM_T_MIN, 1.0))]
     try:
         from scipy.optimize import minimize          # optional
         best = None
@@ -211,7 +221,7 @@ def describe(theta, terms):
         elif t == "RW":
             out["K"] = math.sqrt(math.exp(theta[i])); i += 1
         elif t == "GM":
-            out["gm_sigma"] = math.sqrt(math.exp(theta[i])); out["gm_T"] = math.exp(theta[i + 1]); i += 2
+            out["gm_sigma"] = math.sqrt(math.exp(theta[i])); out["gm_T"] = GM_T_MIN + math.exp(theta[i + 1]); i += 2
     return out
 
 
@@ -221,47 +231,51 @@ def describe(theta, terms):
 def analyse_channel(x_units: np.ndarray, fs: float, lsb_units: float):
     """x_units: rate series in physical units (rad/s or m/s^2); lsb_units: one LSB in the same units."""
     tau, av, ne = avar(x_units, fs)
-    sigma_sample = float(np.std(np.diff(x_units)) / math.sqrt(2.0))      # white part, drift-insensitive
+    # Per-sample noise: total std about a 1 s moving mean (the LPF makes
+    # successive samples correlated, so a difference-based estimate is low).
+    w = max(1, int(fs))
+    k = np.ones(w) / w
+    hp = x_units[w:-w] - np.convolve(x_units, k, mode="same")[w:-w]
+    sigma_sample = float(np.std(hp))
     rho = sigma_sample / lsb_units
     q_var = lsb_units ** 2 / 12.0
-    # White level from the tau^-1/2 region: first decade of tau.
-    sel = tau <= tau[0] * 10.0
+    sel = (tau >= TAU_MIN_FIT) & (tau <= TAU_WHITE_MAX)
     n_meas = float(np.sqrt(np.median(av[sel] * tau[sel])))
     n_phys = math.sqrt(max(n_meas ** 2 - q_var / fs, 0.0))
+    fsel = tau >= TAU_MIN_FIT
     fits = {}
     for terms in (("WN", "RW"), ("WN", "GM", "RW")):
-        th, c = fit(tau, av, ne, fs, terms)
-        k = len(th)
-        fits["+".join(terms)] = {"params": describe(th, terms), "cost": c, "aic": c + 2 * k, "theta": th.tolist(),
-                                 "terms": list(terms)}
+        th, c = fit(tau[fsel], av[fsel], ne[fsel], fs, terms)
+        fits["+".join(terms)] = {"params": describe(th, terms), "cost": c, "aic": c + 2 * len(th),
+                                 "theta": th.tolist(), "terms": list(terms)}
     best = min(fits.values(), key=lambda f: f["aic"])
     adev = np.sqrt(av)
-    i_min = int(np.argmin(adev))
+    i_min = int(np.argmin(adev[fsel])) + int(np.argmax(fsel))
+    env = tau >= TAU_ENV_MIN
+    k_env = float(np.max(adev[env] * np.sqrt(3.0 / tau[env]))) if np.any(env) else float("nan")
     return {
         "tau": tau.tolist(), "adev": adev.tolist(),
         "sigma_sample": sigma_sample, "lsb": lsb_units, "rho": rho, "eta_ok": rho >= 0.8,
         "N_meas": n_meas, "N_phys": n_phys, "quant_share": (q_var / fs) / n_meas ** 2 if n_meas > 0 else float("nan"),
         "adev_min": float(adev[i_min]), "tau_at_min": float(tau[i_min]),
-        "B_flicker": float(adev[i_min] / 0.664),
+        "B_flicker": float(adev[i_min] / 0.664), "K_env": k_env,
         "fits": fits, "best": "+".join(best["terms"]),
     }
 
 
 def iekf_constants(gyro: list[dict], acc: list[dict]) -> dict:
-    """Worst axis (largest) of each quantity: one Q/R for all axes in the IEKF."""
+    """Worst axis of each quantity: the IEKF has one Q/R for all axes.
+    Q_BIAS uses the long-tau envelope K_env = max_tau>=100s sigma(tau) sqrt(3/tau):
+    the random walk that bounds the observed bias wander INCLUDING any
+    temperature-driven drift in the run (conservative; the fitted RRW alone
+    would understate a bias the filter must track on a cooling pad)."""
     n = max(c["N_meas"] for c in gyro)
-    kq = []
-    for c in gyro:
-        p = c["fits"][c["best"]]["params"]
-        k = p.get("K", 0.0)
-        if "gm_sigma" in p:
-            k = max(k, math.sqrt(2.0 * p["gm_sigma"] ** 2 / p["gm_T"]))
-        kq.append(k)
+    k_env = max(c["K_env"] for c in gyro)
     sig_a = max(c["sigma_sample"] for c in acc)
     return {
-        "IEKF_Q_ANGLE": n,                      # rad/s/sqrt(Hz), measured (quantisation included)
-        "IEKF_Q_BIAS": max(kq),                 # rad/s/sqrt(s)
-        "IEKF_R_ACCEL_floor": (sig_a / G0) ** 2,  # normalised direction variance from sensor noise alone
+        "IEKF_Q_ANGLE": n,                        # rad/s/sqrt(Hz), measured (quantisation included)
+        "IEKF_Q_BIAS": k_env,                     # rad/s/sqrt(s)
+        "IEKF_R_ACCEL_floor": (sig_a / G0) ** 2,  # normalised direction variance, sensor noise alone
         "accel_sigma_sample_mps2": sig_a,
     }
 
@@ -299,17 +313,17 @@ def run(stem: str, figs: bool) -> dict:
             res["gyro_tempco_dps_per_C"].append(slope)
 
     ax = "xyz"
-    print("\nGYRO (sensor axes)        ARW meas    ARW phys   quant%  rho    BI(flicker)  K (RRW)     best model")
+    print("\nGYRO  ARW (white, 0.1-1 s)      quant  rho   BI (min/0.664)        RRW fit        K_env (>=100 s)   model")
     for k, c in enumerate(res["gyro"]):
         p = c["fits"][c["best"]]["params"]
-        print(f"  {ax[k]}  {c['N_meas'] / D2R * 1e3 * 60:9.3f} {c['N_phys'] / D2R * 1e3 * 60:9.3f} deg/sqrt(h)  "
-              f"{100 * c['quant_share']:5.1f}  {c['rho']:5.2f}  {c['B_flicker'] / D2R * 3600:7.2f} deg/h  "
-              f"{p.get('K', 0.0) / D2R * 3600 * 60:8.3f} deg/h/sqrt(h)  {c['best']}"
-              + ("" if c["eta_ok"] else "   (rho < 0.8: Sheppard correction unreliable)"))
-    print("\nACCEL                     VRW meas       sigma/sample   BI(flicker)")
+        print(f"  {ax[k]}  {c['N_meas'] / D2R * 1e3:6.2f} mdps/rtHz {c['N_meas'] / D2R * 60:5.3f} deg/rth"
+              f"  {100 * c['quant_share']:4.1f}%  {c['rho']:4.2f}  {c['B_flicker'] / D2R * 3600:5.1f} deg/h @{c['tau_at_min']:5.0f} s"
+              f"  {p.get('K', 0.0) / D2R * 3600 * 60:6.1f} deg/h/rth  {c['K_env'] / D2R * 3600 * 60:6.1f} deg/h/rth  {c['best']}"
+              + ("" if c["eta_ok"] else "  (rho<0.8: Sheppard correction unreliable)"))
+    print("\nACCEL VRW (white, 0.1-1 s)      sigma/sample   BI (min/0.664)")
     for k, c in enumerate(res["accel"]):
-        print(f"  {ax[k]}  {c['N_meas'] * 1e3:9.3f} mm/s/sqrt(s)  {c['sigma_sample'] / G0 * 1e3:7.3f} mg   "
-              f"{c['B_flicker'] / G0 * 1e6:8.1f} ug")
+        print(f"  {ax[k]}  {c['N_meas'] / G0 * 1e6:6.1f} ug/rtHz ({c['N_meas'] * 1e3:5.3f} mm/s/rts)  "
+              f"{c['sigma_sample'] / G0 * 1e3:6.3f} mg   {c['B_flicker'] / G0 * 1e6:6.1f} ug @{c['tau_at_min']:5.0f} s")
     if "gyro_tempco_dps_per_C" in res:
         print("\ngyro bias tempco (dps/degC, 1-min means): "
               + "  ".join(f"{ax[k]} {v:+.4f}" for k, v in enumerate(res["gyro_tempco_dps_per_C"])))
@@ -317,7 +331,7 @@ def run(stem: str, figs: bool) -> dict:
     res["iekf"] = ic
     print("\nboard.h (IEKF, worst axis):")
     print(f"  #define IEKF_Q_ANGLE  {ic['IEKF_Q_ANGLE']:.4e}f  /* rad/s/sqrt(Hz), measured ARW incl. quantisation */")
-    print(f"  #define IEKF_Q_BIAS   {ic['IEKF_Q_BIAS']:.4e}f  /* rad/s/sqrt(s), max(RRW, GM-equivalent RW) */")
+    print(f"  #define IEKF_Q_BIAS   {ic['IEKF_Q_BIAS']:.4e}f  /* rad/s/sqrt(s), long-tau envelope (thermal drift included) */")
     print(f"  sensor-noise floor for IEKF_R_ACCEL: {ic['IEKF_R_ACCEL_floor']:.3e} "
           f"(sigma {ic['accel_sigma_sample_mps2'] / G0 * 1e3:.2f} mg per sample); R must also cover "
           f"non-gravitational acceleration (handling, vibration) -- see README")
@@ -346,8 +360,10 @@ def plot(res: dict, stem: str) -> None:
             tau = np.asarray(c["tau"])
             a.loglog(tau, np.asarray(c["adev"]) * scale, "k.", ms=3, label="overlapping ADEV")
             f = c["fits"][c["best"]]
-            a.loglog(tau, np.sqrt(model_avar(np.asarray(f["theta"]), tau, fs, f["terms"])) * scale, "C0-",
-                     label=f"fit {c['best']}")
+            tf = tau[tau >= TAU_MIN_FIT]
+            a.loglog(tf, np.sqrt(model_avar(np.asarray(f["theta"]), tf, fs, f["terms"])) * scale, "C0-",
+                     label=f"fit {c['best']} (tau >= {TAU_MIN_FIT:g} s)")
+            a.axvspan(tau[0], TAU_MIN_FIT, color="0.9", zorder=0, label="sensor LPF region (not fitted)")
             a.loglog(tau, np.sqrt(c["lsb"] ** 2 / 12 / fs / tau) * scale, "C3--", lw=1,
                      label="quantisation share (white, slope -1/2)")
             a.set_title(f"{name} {'xyz'[k]}")
