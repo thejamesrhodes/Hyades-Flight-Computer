@@ -1,0 +1,20 @@
+{
+ "line": "IMUCAP v1 odr_mHz=224200 a_lsb_per_g=2048 g_lsb_per_dps_x1000=16000 ctrl=40 35 75 00 77 00 03 build=46390eb2+49f9dd Nov  3 2026 (binary IMU frames follow; 'reboot' to end)",
+ "odr_hz": 224.2,
+ "a_lsb_per_g": 2048.0,
+ "g_lsb_per_dps": 16.0,
+ "build": "46390eb2+49f9dd",
+ "ctrl": "40 35 75 00 77 00 03",
+ "accel_fs_g": 16,
+ "gyro_fs_dps": 2048,
+ "lpf_pct_odr": 13.37,
+ "port": "COM8",
+ "note": "bench, flat, untouched, room ~19 C, USB direct",
+ "start_utc": "2026-11-03T20:10:33Z",
+ "requested_s": 28800.0,
+ "duration_s": 8853.7,
+ "samples": 1982674,
+ "gaps": 0,
+ "lost": 0,
+ "bad_frames": 0
+}

@@ -157,15 +157,29 @@
  * Left-invariant attitude + gyro-bias EKF (Barrau & Bonnabel 2017). For the
  * attitude-only problem with body-frame vector measurements this shares its
  * mechanisation with a body-frame MEKF; the invariant error gives the
- * trajectory-independent propagation Jacobian. Same datasheet noise as before.
+ * trajectory-independent propagation Jacobian.
  * -------------------------------------------------------------------------- */
-/* INITIAL values: datasheet ARW 13 mdps/rtHz (quantisation at +/-2048 dps adds
- * only ~1 % in variance at 224 Hz: (62.5 mdps)^2/12/224 Hz vs 13^2) and a
- * generic consumer-MEMS bias walk. Replace both with fc_noise.py output from
- * the overnight capture (README "IMU configuration and noise"). */
-#define IEKF_Q_ANGLE          2.269e-4f  /* rad/s/rtHz (ARW)                    */
-#define IEKF_Q_BIAS           1.0e-6f    /* rad/s/rts  (bias random walk)       */
-#define IEKF_R_ACCEL          4.0e-2f    /* accel dir update var (normalised)   */
+/* MEASURED, capture 20261103-201033: 2.46 h static, 224.2 Hz, flight config
+ * (+/-16 g, +/-2048 dps, LPF 13.37 % ODR), 0 lost samples, 26.2-27.5 degC.
+ * Tools/fc_noise.py, white level read over tau 0.1-1 s (below that the sensor
+ * LPF shapes the curve):
+ *   gyro ARW  7.4 / 8.5 / 7.7 mdps/rtHz (x y z; datasheet 13). Rate-register
+ *             quantisation (white, Allan slope -1/2) is 2.0-2.7 % of that
+ *             variance; rho = sigma/LSB = 0.93-1.2, i.e. at the eta knee.
+ *   gyro BI   13.5 / 8.3 / 16.6 deg/h; tempco +0.023 / +0.008 / 0.000 dps/degC
+ *   accel     66 / 67 / 84 ug/rtHz, 0.56-0.65 mg per sample, BI 53-105 ug
+ * Q_ANGLE = worst-axis measured ARW (quantisation included: it is what the
+ *   filter integrates).
+ * Q_BIAS  = long-tau envelope max sigma(tau)*sqrt(3/tau), tau >= 100 s: covers
+ *   the observed bias wander INCLUDING the 1.3 degC thermal drift (x axis);
+ *   13x the old generic value. A cooling pad drifts the bias the same way.
+ * R_ACCEL = sensor floor (0.65 mg)^2 = 4.3e-7 plus unmodelled non-gravitational
+ *   acceleration on the pad, taken as 0.03 g 1-sigma (sway, handling that
+ *   passes the |a| gate) -> 1e-3 (was 4e-2, 0.2 g). Larger transients are
+ *   rejected by the |a| and NIS gates. Validate on the bench / HITL H1. */
+#define IEKF_Q_ANGLE          1.49e-4f   /* rad/s/rtHz (ARW), 8.5 mdps/rtHz      */
+#define IEKF_Q_BIAS           1.29e-5f   /* rad/s/rts  (bias random walk)        */
+#define IEKF_R_ACCEL          1.0e-3f    /* accel dir update var (normalised)    */
 #define IEKF_R_MAG            5.0e-3f     /* mag   dir update var (normalised)   */
 #define IEKF_ACCEL_MIN        7.5f       /* |a| gate, m/s^2                     */
 #define IEKF_ACCEL_MAX        12.0f
