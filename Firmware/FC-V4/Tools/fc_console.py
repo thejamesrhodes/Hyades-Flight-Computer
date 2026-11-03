@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import glob
 import contextlib
 import io
 import json
@@ -55,7 +56,7 @@ SETTINGS = os.path.join(os.path.expanduser("~"), ".fc_console.json")
 FW_ROOT = os.path.normpath(os.path.join(HERE, ".."))
 DEFAULT_ELF = os.path.join(FW_ROOT, "Debug", "Flight Controller V4.elf")
 LOG_DIR = os.path.join(HERE, "logs")
-ERR_RE = re.compile(r"^(ERR|FWABORT|usage)|\bFAIL(ED)?\b|\bbad\b|CROSSED|no signal|CORRUPT")
+ERR_RE = re.compile(r"^(ERR|FWABORT|usage)|\bFAIL(ED)?\b|\bbad\b(?!=)|CROSSED|no signal|CORRUPT|held low|floating")
 STALE_S = 1.5                       # status older than this is shown as STALE
 
 # ---------------------------------------------------------------------------
@@ -101,6 +102,21 @@ def newest_source() -> float:
                     with contextlib.suppress(OSError):
                         t = max(t, os.path.getmtime(os.path.join(dp, f)))
     return t
+
+
+def find_cubeide(hint: str = "") -> str:
+    """stm32cubeidec.exe (the console-mode launcher) for headless builds."""
+    pats = [hint] if hint else []
+    pats += [os.path.join(os.path.dirname(os.path.dirname(FW_ROOT)), "..", "STM32_IDE", "STM32CubeIDE_*",
+                          "STM32CubeIDE", "stm32cubeidec.exe"),
+             r"C:\Hyades Rocket Files\STM32_IDE\STM32CubeIDE_*\STM32CubeIDE\stm32cubeidec.exe",
+             r"C:\ST\STM32CubeIDE_*\STM32CubeIDE\stm32cubeidec.exe",
+             "/opt/st/stm32cubeide_*/stm32cubeide"]
+    for pat in pats:
+        hits = sorted(glob.glob(os.path.normpath(pat)))
+        if hits:
+            return hits[-1]
+    return ""
 
 
 def open_folder(path: str) -> None:
@@ -180,6 +196,68 @@ class VScroll(tk.Frame):
             w.configure(bg=c["bg"])
 
 
+# Okabe-Ito colour-blind-safe series colours (legend text carries the name too).
+SERIES = ("#0072B2", "#D55E00", "#009E73", "#CC79A7")
+
+
+class StripChart(tk.Canvas):
+    """Scrolling time plot of a few series, newest at the right edge.
+
+    Fixed symmetric y-range by default (a jumping auto-scale hides the size of
+    a disturbance); values beyond it are drawn clipped with a marker. The
+    legend shows each series' current value, so it is readable without
+    hovering.
+    """
+
+    def __init__(self, app, master, title: str, unit: str, names: tuple, keys: tuple, yrange: float,
+                 scales: tuple = ()):
+        super().__init__(master, height=170, highlightthickness=1, bd=0)
+        self.app, self.title, self.unit = app, title, unit
+        self.names, self.keys, self.yr = names, keys, yrange
+        self.scales = scales or (1.0,) * len(keys)        # plotted = value * scale; legend shows value
+        self.bind("<Configure>", lambda _e: self.draw())
+
+    def draw(self) -> None:
+        a, c = self.app, self.app.c
+        self.delete("all")
+        self.configure(bg=c["term"], highlightbackground=c["edge"])
+        w, h = max(self.winfo_width(), 200), max(self.winfo_height(), 120)
+        x0, x1, y0, y1 = 56, w - 10, 26, h - 20
+        mid = (y0 + y1) / 2
+        span = a.plot_window
+        now = a.plot_now()
+        self.create_text(8, 4, anchor="nw", text=f"{self.title} ({self.unit})", fill=c["text"], font=a.f_head)
+        for frac, lab in ((0, f"+{self.yr:g}"), (0.5, "0"), (1, f"-{self.yr:g}")):
+            y = y0 + frac * (y1 - y0)
+            self.create_line(x0, y, x1, y, fill=c["edge"] if frac != 0.5 else c["dim"],
+                             dash=(2, 4) if frac != 0.5 else ())
+            self.create_text(x0 - 6, y, anchor="e", text=lab, fill=c["dim"], font=a.f_ui)
+        for k in range(1, 5):
+            x = x1 - (x1 - x0) * k / 4
+            self.create_line(x, y0, x, y1, fill=c["edge"], dash=(2, 4))
+            self.create_text(x, y1 + 3, anchor="n", text=f"-{span * k / 4:g}s", fill=c["dim"], font=a.f_ui)
+        hist = [(t, d) for t, d in a.plot_hist if now - t <= span]
+        lx = x0 + 160
+        for j, (name, key, k) in enumerate(zip(self.names, self.keys, self.scales)):
+            col = SERIES[j % len(SERIES)]
+            pts = []
+            for t, d in hist:
+                v = d.get(key)
+                if v is None or v != v:
+                    continue
+                vc = max(-self.yr, min(self.yr, v * k))
+                pts += [x1 - (now - t) / span * (x1 - x0), mid - vc / self.yr * (y1 - y0) / 2]
+            if len(pts) >= 4:
+                self.create_line(*pts, fill=col, width=2)
+            cur = hist[-1][1].get(key) if hist else None
+            txt = f"{name} {cur:+.1f}" if isinstance(cur, float) and cur == cur else f"{name} --"
+            self.create_rectangle(lx, 8, lx + 10, 18, fill=col, outline="")
+            self.create_text(lx + 14, 13, anchor="w", text=txt, fill=c["text"], font=a.f_ui)
+            lx += 120
+        if a.plot_frozen:
+            self.create_text(x1, 4, anchor="ne", text="FROZEN (Space)", fill=c["warn"], font=a.f_head)
+
+
 class App:
     def __init__(self, root: tk.Tk, args):
         self.root = root
@@ -203,6 +281,11 @@ class App:
         self.rx_mark, self.rate_t = 0, time.monotonic()
         self.last_pull_dir: str | None = None
         self._showing_why = False
+        self.plot_hist: collections.deque = collections.deque(maxlen=12000)
+        self.plot_window = float(self.cfg.get("plot_window", 20))
+        self.plot_frozen = False
+        self.plot_freeze_t = 0.0
+        self.fault_list: list[str] = []
         self.ev_phase: str | None = None
 
         self._fonts()
@@ -246,6 +329,12 @@ class App:
     def _build(self) -> None:
         r = self.root
         r.title(APP)
+        with contextlib.suppress(tk.TclError):             # taskbar/title icon
+            if sys.platform.startswith("win"):
+                r.iconbitmap(default=os.path.join(HERE, "fc_console.ico"))
+            else:
+                self._icon = tk.PhotoImage(file=os.path.join(HERE, "fc_console.png"))
+                r.iconphoto(True, self._icon)
         geo = self.cfg.get("geometry", "1280x800")
         try:                                    # never restore a window larger than this screen
             w, h = (int(v) for v in geo.split("+")[0].split("x"))
@@ -297,15 +386,15 @@ class App:
         self.nb.pack(side="left", fill="both", expand=True)
         self.p_console = tk.Frame(self.nb)
         self.p_dash = tk.Frame(self.nb)
-        self.p_events = tk.Frame(self.nb)
-        self.frames_ += [self.p_console, self.p_dash, self.p_events]
+        self.p_plots = tk.Frame(self.nb)
+        self.frames_ += [self.p_console, self.p_dash, self.p_plots]
         self.nb.add(self.p_console, text="  Console  (Ctrl+1)  ")
         self.nb.add(self.p_dash, text="  Dashboard  (Ctrl+2)  ")
-        self.nb.add(self.p_events, text="  Events  (Ctrl+3)  ")
+        self.nb.add(self.p_plots, text="  Plots  (Ctrl+3)  ")
         self._console(self.p_console)
         self._dashboard(self.p_dash)
-        self._events(self.p_events)
-        self.nb.select(int(self.cfg.get("tab", 0)))
+        self._plots(self.p_plots)
+        self.nb.select(min(int(self.cfg.get("tab", 0)), 2))
         self.nb.bind("<<NotebookTabChanged>>", lambda _e: self._tab_changed())
 
         foot = tk.Frame(r)
@@ -321,6 +410,7 @@ class App:
             r.bind_all(f"<Control-Key-{i}>", lambda _e, k=i - 1: self.nb.select(k))
         r.bind_all("<F1>", lambda _e: self.show_keys())
         r.bind_all("<F2>", lambda _e: self.toggle_stream())
+        r.bind_all("<F4>", lambda _e: self.on_build())
         r.bind_all("<F5>", lambda _e: self.on_flash())
         r.bind_all("<F6>", lambda _e: self.on_pull())
         r.bind_all("<F7>", lambda _e: self.apply_theme("bench" if self.c is THEMES["field"] else "field"))
@@ -330,6 +420,8 @@ class App:
         r.bind_all("<Control-equal>", lambda _e: self.zoom(0.1))
         r.bind_all("<Control-minus>", lambda _e: self.zoom(-0.1))
         r.bind_all("<Escape>", lambda _e: self.entry.focus_set())
+        r.bind_all("<F8>", lambda _e: self.on_clear_faults())
+        r.bind_all("<space>", self._space)
 
     def _menu(self) -> None:
         m = tk.Menu(self.root)
@@ -345,7 +437,9 @@ class App:
         m.add_cascade(label="File", menu=f)
         b = tk.Menu(m, tearoff=0)
         b.add_command(label="Flash firmware...", accelerator="F5", command=self.on_flash)
+        b.add_command(label="Build firmware (headless CubeIDE)", accelerator="F4", command=self.on_build)
         b.add_command(label="Choose firmware ELF...", command=self.choose_elf)
+        b.add_command(label="Locate STM32CubeIDE...", command=self.choose_ide)
         b.add_separator()
         b.add_command(label="Pull + decode flight log", accelerator="F6", command=self.on_pull)
         b.add_command(label="Erase flight log...", command=self.on_erase)
@@ -385,13 +479,14 @@ class App:
         self.b_stream = self._button(s, "Pause status   F2", self.toggle_stream)
         self.b_stream.pack(fill="x")
 
-        self._heading(s, "Query")
+        self._heading(s, "Diagnostics")
         g = tk.Frame(s)
         g.pack(fill="x")
         self.frames_.append(g)
         self.query_btns = []
-        for i, c in enumerate(("faults", "tasks", "imu", "gps", "ver", "help")):
-            b = self._button(g, c, lambda c=c: self.send(c))
+        for i, (label, cmds) in enumerate((("Faults", ("faults",)), ("Task timing", ("tasks",)),
+                                           ("GPS diagnose", ("gps probe", "gps raw")), ("IMU", ("imu",)))):
+            b = self._button(g, label, lambda c=cmds: self.send_many(c))
             b.grid(row=i // 2, column=i % 2, sticky="ew", padx=(0, 4) if i % 2 == 0 else 0, pady=(0, 4))
             self.query_btns.append(b)
         g.columnconfigure(0, weight=1)
@@ -420,20 +515,16 @@ class App:
         self.dim_labels.append(self.elf_l)
         self.b_elf = self._button(s, "Choose ELF...", self.choose_elf)
         self.b_elf.pack(fill="x", pady=(3, 4))
+        self.b_build = self._button(s, "Build (CubeIDE)   F4", self.on_build)
+        self.b_build.pack(fill="x", pady=(0, 4))
         self.b_flash = self._button(s, "Flash firmware   F5", self.on_flash, primary=True)
         self.b_flash.pack(fill="x")
 
         self._heading(s, "Board")
+        self.b_clear_faults = self._button(s, "Clear faults...   F8", self.on_clear_faults, danger=True)
+        self.b_clear_faults.pack(fill="x", pady=(0, 4))
         self.b_reboot = self._button(s, "Reboot...", self.on_reboot, danger=True)
-        self.b_reboot.pack(fill="x", pady=(0, 4))
-        self.inject_mb = tk.Menubutton(s, text="Fault injection (bench)  ▾", font=self.f_btn, relief="flat",
-                                       anchor="w", padx=8, pady=6, highlightthickness=2)
-        im = tk.Menu(self.inject_mb, tearoff=0)
-        for k, why in (("imu", "force IMU read failures -> LOCKOUT"), ("phase", "corrupt the phase word -> LOCKOUT"),
-                       ("wdg", "stall the loop -> watchdog reset -> LOCKOUT")):
-            im.add_command(label=f"inject {k}: {why}...", command=lambda k=k, w=why: self.on_inject(k, w))
-        self.inject_mb.configure(menu=im)
-        self.inject_mb.pack(fill="x")
+        self.b_reboot.pack(fill="x")
 
         # Operation progress, pinned to the bottom of the rail.
         op = tk.Frame(self.rail_outer)
@@ -467,7 +558,7 @@ class App:
         self.find_e.pack(side="right", padx=(4, 8), ipady=3)
         self.find_e.bind("<Return>", lambda _e: self.find_next())
         self.find_e.bind("<KeyRelease>", lambda e: e.keysym != "Return" and self.find_all())
-        fl = tk.Label(bar, text="Find (Ctrl+F, Enter = next)", font=self.f_ui)
+        fl = tk.Label(bar, text="Find  Ctrl+F", font=self.f_ui)
         fl.pack(side="right")
         self.dim_labels.append(fl)
 
@@ -566,6 +657,13 @@ class App:
             cell.grid(row=1, column=i, padx=3, pady=(4, 0), sticky="ew")
             ff.columnconfigure(i, weight=1)
             self.mon_cells.append(cell)
+        ev = tk.Frame(grid, highlightthickness=1, padx=10, pady=6)
+        ev.grid(row=3, column=0, columnspan=3, sticky="nsew", padx=5, pady=5)
+        self.panels_.append(ev)
+        h = tk.Label(ev, text="EVENTS  (phase changes, trips, log; newest last)", font=self.f_head, anchor="w")
+        h.pack(fill="x")
+        self.panel_labels.append((h, "dim"))
+        self._events(ev)
         for c in range(3):
             grid.columnconfigure(c, weight=1)
         self.dash_note = tk.Label(p, anchor="w", font=self.f_ui, padx=12,
@@ -574,25 +672,84 @@ class App:
         self.dim_labels.append(self.dash_note)
 
     def _events(self, p) -> None:
-        bar = tk.Frame(p)
-        bar.pack(fill="x", padx=6, pady=6)
-        self.frames_.append(bar)
-        l = tk.Label(bar, text="Phase changes, trips and log/maintenance events ([EVT] lines), newest last.",
-                     font=self.f_ui, anchor="w")
-        l.pack(side="left")
-        self.dim_labels.append(l)
-        self.b_evclear = self._button(bar, "Clear", lambda: self.ev.delete(*self.ev.get_children()))
-        self.b_evclear.pack(side="right")
         cols = ("pc", "board", "phase", "text")
-        self.ev = ttk.Treeview(p, columns=cols, show="headings", style="Ev.Treeview")
-        for col, title, w in (("pc", "PC time", 110), ("board", "Board t (s)", 110), ("phase", "Phase", 110),
-                              ("text", "Event", 600)):
+        wrap = tk.Frame(p)
+        wrap.pack(fill="both", expand=True, pady=(4, 0))
+        self.frames_.append(wrap)
+        self.ev = ttk.Treeview(wrap, columns=cols, show="headings", style="Ev.Treeview", height=7)
+        for col, title, w in (("pc", "PC time", 100), ("board", "Board t (s)", 100), ("phase", "Phase", 90),
+                              ("text", "Event", 500)):
             self.ev.heading(col, text=title, anchor="w")
             self.ev.column(col, width=w, anchor="w", stretch=(col == "text"))
-        ys = ttk.Scrollbar(p, orient="vertical", command=self.ev.yview)
+        ys = ttk.Scrollbar(wrap, orient="vertical", command=self.ev.yview)
         self.ev.configure(yscrollcommand=ys.set)
-        ys.pack(side="right", fill="y", pady=(0, 6))
-        self.ev.pack(fill="both", expand=True, padx=(6, 0), pady=(0, 6))
+        ys.pack(side="right", fill="y")
+        self.ev.pack(fill="both", expand=True)
+
+    def _plots(self, p) -> None:
+        bar = tk.Frame(p)
+        bar.pack(fill="x", padx=8, pady=6)
+        self.frames_.append(bar)
+        l = tk.Label(bar, text="Window", font=self.f_ui)
+        l.pack(side="left")
+        self.dim_labels.append(l)
+        self.plot_btns = {}
+        for sec in (10, 20, 60):
+            b = self._button(bar, f"{sec} s", lambda v=sec: self._set_window(v))
+            b.pack(side="left", padx=(6, 0))
+            self.plot_btns[sec] = b
+        self.b_freeze = self._button(bar, "Freeze   Space", self.toggle_freeze)
+        self.b_freeze.pack(side="left", padx=(16, 0))
+        note = tk.Label(bar, font=self.f_ui, text="Fixed scales; clipped values sit on the top/bottom line.")
+        note.pack(side="left", padx=(16, 0))
+        self.dim_labels.append(note)
+        self.charts = [
+            StripChart(self, p, "Attitude", "deg; yaw drawn at half scale", ("roll", "pitch", "yaw"),
+                       ("roll", "pitch", "yaw"), 90.0, (1.0, 1.0, 0.5)),
+            StripChart(self, p, "Body rates", "deg/s", ("x", "y", "z"), ("wx", "wy", "wz"), 100.0),
+            StripChart(self, p, "Fin commands", "x100 %", ("0 top", "1 right", "2 bottom", "3 left"),
+                       ("f0", "f1", "f2", "f3"), 100.0),
+        ]
+        for ch in self.charts:
+            ch.pack(fill="both", expand=True, padx=8, pady=(0, 6))
+
+    def _set_window(self, sec: float) -> None:
+        self.plot_window = self.cfg["plot_window"] = float(sec)
+        self._style_plot_btns()
+        self.draw_plots()
+
+    def _style_plot_btns(self) -> None:
+        for sec, b in self.plot_btns.items():
+            on = abs(sec - self.plot_window) < 0.5
+            b.configure(relief="sunken" if on else "flat", bg=self.c["sel"] if on else self.c["btn"])
+
+    def toggle_freeze(self) -> None:
+        self.plot_frozen = not self.plot_frozen
+        self.plot_freeze_t = time.monotonic()
+        self.b_freeze.configure(text="Resume   Space" if self.plot_frozen else "Freeze   Space")
+        self.draw_plots()
+
+    def _space(self, e):
+        if self.nb.index("current") == 2 and e.widget not in (self.entry, self.find_e):
+            self.toggle_freeze()
+            return "break"
+        return None
+
+    def plot_now(self) -> float:
+        return self.plot_freeze_t if self.plot_frozen else time.monotonic()
+
+    def _plot_add(self, st: dict) -> None:
+        if not self.plot_frozen:
+            d = {k: st.get(k) for k in ("roll", "pitch", "yaw", "wx", "wy", "wz")}
+            for i in range(4):
+                f = st.get(f"f{i}")
+                d[f"f{i}"] = f * 100 if isinstance(f, float) else None
+            self.plot_hist.append((time.monotonic(), d))
+
+    def draw_plots(self) -> None:
+        if self.nb.index("current") == 2:
+            for ch in self.charts:
+                ch.draw()
 
     # ------------------------------------------------------------------ theme
     def apply_theme(self, name: str) -> None:
@@ -603,8 +760,6 @@ class App:
             f.configure(bg=c["bg"])
         for b in self.buttons:
             self._style_button(b)
-        self.inject_mb.configure(bg=c["btn"], fg=c["bad"], activebackground=c["btnhot"], activeforeground=c["bad"],
-                                 highlightbackground=c["bg"])
         for lab in self.dim_labels:
             lab.configure(bg=c["bg"], fg=c["dim"])
         for lab in self.labels_:
@@ -646,6 +801,9 @@ class App:
         for t in self.themed:
             t.retheme(c)
         self.draw_fins()
+        if hasattr(self, "plot_btns"):
+            self._style_plot_btns()
+            self.draw_plots()
         self.refresh_controls()
 
     def _style_button(self, b: tk.Button) -> None:
@@ -704,6 +862,7 @@ class App:
         elif state == "waiting" and detail == "board disconnected":
             self.note("board disconnected (reset, reflash or cable) - reconnecting automatically", "note")
             self.status = None
+            self.fault_list = []
         elif state == "busy":
             self.note(f"{detail}. Close Tera Term / the CubeIDE serial console; retrying.", "err")
         self.refresh_controls()
@@ -718,6 +877,7 @@ class App:
             st = link.parse_status(s)
             if st:
                 self.status, self.status_t = st, time.monotonic()
+                self._plot_add(st)
                 self.stream_on = True
                 self.pin.configure(text="status: " + s[s.find("t="):])
                 if self.v_show_status.get():
@@ -769,6 +929,8 @@ class App:
         st["active"] = st["latched"] = None
         st["fault_any"] = bool(h & (1 << 8))
         self.status, self.status_t = st, self.frame_t
+        if f["frame"] % 4 == 0:                                   # 25 Hz is plenty for a strip plot
+            self._plot_add(st)
 
     def _event(self, ev: dict) -> None:
         to = ev["text"].rsplit("->", 1)[-1].strip()
@@ -778,16 +940,15 @@ class App:
         bad = any(w in up for w in ("TRIP", "LOCKOUT", "CATO", "FAIL", "CORRUPT", "WATCHDOG"))
         advisory = bad and any(n in ev["text"] for n in link.ADVISORY) and "LOCKOUT" not in up
         tag = "warn" if advisory else ("bad" if bad else ("ok" if ev["text"].endswith("READY") else ""))
-        bad = bad and not advisory
         iid = self.ev.insert("", "end", values=(time.strftime("%H:%M:%S"), f"{ev['ms'] / 1000:.2f}", ev["phase"],
                                                 ev["text"]), tags=(tag,))
         self.ev.see(iid)
-        if bad and self.nb.index("current") != 2:
-            self.nb.tab(2, text="  Events (!)  (Ctrl+3)  ")
+        kids = self.ev.get_children()
+        if len(kids) > 500:
+            self.ev.delete(*kids[:len(kids) - 500])
 
     def _tab_changed(self) -> None:
-        if self.nb.index("current") == 2:
-            self.nb.tab(2, text="  Events  (Ctrl+3)  ")
+        self.draw_plots()
 
     # ---------------------------------------------------------------- terminal
     def _write(self, items: list[tuple[str, str]]) -> None:
@@ -956,6 +1117,7 @@ class App:
         self.refresh_header()
         self.refresh_dashboard()
         self.refresh_controls()
+        self.draw_plots()
         now = time.monotonic()
         if now - self.rate_t >= 1.0:
             rate = (self.board.rx_bytes - self.rx_mark) / (now - self.rate_t)
@@ -986,20 +1148,14 @@ class App:
             self.t_mode.set(st["mode"], {"FULL": "ok", "RDAMP": "warn"}.get(st["mode"], "idle"))
             a, l = st.get("active", 0), st.get("latched", 0)
             if a is None:                                       # binary frames: summary bit only
-                self.t_fault.set("FAULT (see 'faults')" if st.get("fault_any") else "none",
+                self.fault_list = []
+                self.t_fault.set("FAULT (see Faults)" if st.get("fault_any") else "none",
                                  "bad" if st.get("fault_any") else "ok")
-            elif l == 0xFFFFFFFF:
-                self.t_fault.set("LATCH CORRUPT", "bad")
-            elif a or l:
-                act = ",".join(link.fault_names(a))
-                lat = ",".join(link.fault_names(l & ~a))
-                text = " ".join(x for x in (act, f"latched: {lat}" if lat else "") if x)
-                serious = [n for n in link.fault_names(a | l) if n not in link.ADVISORY]
-                if not serious:
-                    text += "  (advisory)"
-                self.t_fault.set(text, "bad" if (a and serious) else "warn")
             else:
-                self.t_fault.set("none", "ok")
+                text, style, self.fault_list = link.fault_summary(a, l, ph)
+                if age >= STALE_S:                              # do not present old faults as current
+                    text, style = f"{text}  (stale)", "idle"
+                self.t_fault.set(text, style)
         else:
             for t in (self.t_phase, self.t_mode, self.t_fault):
                 t.set("--", "idle")
@@ -1045,10 +1201,11 @@ class App:
         for i, cell in enumerate(self.mon_cells):
             if not fresh or a is None:
                 cell.set("--", "idle")
-            elif (a >> i) & 1:
-                cell.set("ACTIVE", "warn" if link.MONITORS[i] in link.ADVISORY else "bad")
             elif (l >> i) & 1:
-                cell.set("latched", "warn")
+                cell.set("FAIL" if (a >> i) & 1 else "latched", "bad")
+            elif (a >> i) & 1:
+                sev = link.SEV[link.MONITORS[i]][1 if st.get("phase") in link.IN_FLIGHT else 0]
+                cell.set("FAIL" if sev != "INFO" else "info", {"HARD": "bad", "SOFT": "warn"}.get(sev, "info"))
             else:
                 cell.set("ok", "ok")
         self.draw_fins()
@@ -1090,9 +1247,11 @@ class App:
         risky = ok and not flying
         for b in (self.b_pull, self.b_erase, self.b_flash, self.b_reboot):
             b.configure(state="normal" if risky else "disabled")
-        self.inject_mb.configure(state="normal" if risky else "disabled")
+        clearable = ok and ph not in link.IN_FLIGHT and ph != "CATO"
+        self.b_clear_faults.configure(state="normal" if clearable else "disabled")
         self.b_open.configure(state="normal" if self.last_pull_dir else "disabled")
         self.b_elf.configure(state="normal" if idle else "disabled")
+        self.b_build.configure(state="normal" if idle else "disabled")
         if self.busy:
             why = f"Busy: {self.busy}"
         elif not conn:
@@ -1160,6 +1319,57 @@ class App:
             self.elf_l.configure(text=f"{os.path.basename(self.elf)}\nbuilt {age:.0f} min ago")
         else:
             self.elf_l.configure(text=f"{os.path.basename(self.elf)}\nNOT FOUND - build first or choose")
+
+    def choose_ide(self) -> str:
+        p = filedialog.askopenfilename(title="stm32cubeidec.exe (in the STM32CubeIDE install folder)",
+                                       filetypes=[("CubeIDE console launcher", "stm32cubeidec*"), ("All", "*.*")])
+        if p:
+            self.cfg["ide"] = p
+        return p
+
+    def on_build(self) -> None:
+        if self.busy:
+            return
+        ide = find_cubeide(self.cfg.get("ide", ""))
+        if not ide:
+            messagebox.showinfo(APP, "STM32CubeIDE was not found. Point me at stm32cubeidec.exe "
+                                     "(STM32CubeIDE install folder).")
+            ide = self.choose_ide()
+            if not ide:
+                return
+        self._start("building", self._build_fw, ide)
+        self.ui(lambda: (self.prog.configure(mode="indeterminate"), self.prog.start(15)))
+
+    def _build_fw(self, ide: str) -> None:
+        """Headless CDT build of the Debug config in a scratch workspace, so it
+        works whether or not the CubeIDE GUI is open (its workspace stays locked)."""
+        import tempfile
+        ws = os.path.join(tempfile.gettempdir(), "fcv4_headless_ws")
+        cmd = [ide, "--launcher.suppressErrors", "-nosplash", "-application",
+               "org.eclipse.cdt.managedbuilder.core.headlessbuild", "-data", ws,
+               "-import", FW_ROOT, "-build", "Flight Controller V4/Debug"]
+        self.ui(lambda: self.note("build: headless CubeIDE (Debug), ~20 s"))
+        t0 = time.monotonic()
+        flags = 0x08000000 if sys.platform.startswith("win") else 0         # CREATE_NO_WINDOW
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                             text=True, errors="replace", creationflags=flags)
+        result, size_next = None, False
+        for line in p.stdout:
+            line = line.rstrip()
+            show = size_next or bool(re.search(r"\b(error|warning):", line)) or "Build Finished" in line
+            size_next = line.lstrip().startswith("text")                # the arm-none-eabi-size table
+            if show or size_next:
+                self.ui(lambda l=line: self._write([(l, "err" if " error:" in l else "")]))
+            m = re.search(r"Build Finished\. (\d+) errors?, (\d+) warnings?", line)
+            if m:
+                result = (int(m.group(1)), int(m.group(2)))
+        p.wait()
+        dt = time.monotonic() - t0
+        if result and result[0] == 0:
+            self.ui(lambda: (self._update_elf_label(),
+                             self._op_msg(f"build OK in {dt:.0f} s ({result[1]} warnings) - F5 to flash", "ok")))
+        else:
+            self.ui(lambda: self._op_msg(f"build FAILED (exit {p.returncode}) - see terminal", "err"))
 
     def choose_elf(self) -> None:
         p = filedialog.askopenfilename(title="Firmware ELF", initialdir=os.path.dirname(self.elf),
@@ -1337,18 +1547,28 @@ class App:
                 icon="warning", default="cancel"):
             self.tx("reboot")
 
-    def on_inject(self, kind: str, why: str) -> None:
-        if self.inject_mb.cget("state") == "disabled":
+    def on_clear_faults(self) -> None:
+        if self.b_clear_faults.cget("state") == "disabled":
             return
-        if messagebox.askokcancel(APP, f"inject {kind}: {why}.\n\nBench test only. The board latches LOCKOUT "
-                                       f"(fins centred); a reboot clears it.", icon="warning", default="cancel"):
-            self.tx(f"inject {kind}")
+        listed = "\n".join("  " + f for f in self.fault_list) or "  (none reported)"
+        if messagebox.askokcancel(APP, f"Clear latched faults?\n\n{listed}\n\nPad only. Refused while a HARD "
+                                       f"monitor is still failing. From LOCKOUT the board re-enters SETTLE and "
+                                       f"needs the full fault-free hold before READY.", icon="warning",
+                                  default="cancel"):
+            self.tx("faults clear")
+
+    def send_many(self, cmds) -> None:
+        for c in cmds:
+            if not self.send(c):
+                return
 
     # ---------------------------------------------------------------- misc
     def show_keys(self) -> None:
-        messagebox.showinfo(APP, "F1  this list\nF2  pause / resume status stream\nF5  flash firmware\n"
-                                 "F6  pull + decode flight log\nF7  field / bench theme\n\n"
-                                 "Ctrl+1/2/3  Console / Dashboard / Events\nCtrl+F  find (Enter = next)\n"
+        messagebox.showinfo(APP, "F1  this list\nF2  pause / resume status stream\nF4  build firmware (CubeIDE)\n"
+                                 "F5  flash firmware\n"
+                                 "F6  pull + decode flight log\nF7  field / bench theme\nF8  clear latched faults (pad)\n\n"
+                                 "Ctrl+1/2/3  Console / Dashboard / Plots\nSpace  freeze plots (Plots tab)\n"
+                                 "Ctrl+F  find (Enter = next)\n"
                                  "Ctrl+L  clear terminal\nCtrl+ +/-  text size\nEsc  back to the command box\n\n"
                                  "Command box: Up/Down history, Tab completes.\n"
                                  "Scroll the terminal up to pause it; scroll to the end to follow again.")
@@ -1376,7 +1596,7 @@ class App:
         zoomed = self.root.state() == "zoomed"
         if not zoomed:
             self.cfg["geometry"] = self.root.geometry()
-        self.cfg.update(zoomed=zoomed, tab=self.nb.index("current"), history=self.history[-200:],
+        self.cfg.update(zoomed=zoomed, plot_window=self.plot_window, tab=self.nb.index("current"), history=self.history[-200:],
                         show_status=self.v_show_status.get(), stamps=self.v_stamp.get(), elf=self.elf)
         save_settings(self.cfg)
         self.board.stop()
@@ -1397,9 +1617,11 @@ def main() -> None:
         except ImportError:
             sys.exit("pyserial is required:  pip install pyserial")
     if sys.platform.startswith("win"):
+        import ctypes
         with contextlib.suppress(Exception):                    # crisp text on high-DPI laptops
-            import ctypes
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        with contextlib.suppress(Exception):                    # own taskbar icon, not python's
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Hyades.FCV4.Console")
     root = tk.Tk()
     App(root, args)
     root.mainloop()

@@ -72,6 +72,10 @@ bool    Fdir_LatchRead(const Fdir *f, uint32_t *latch);
 
 /* Worst severity among active monitors and the latch (corrupt latch = HARD). */
 FdirSev Fdir_Worst(const Fdir *f, bool in_flight);
+uint32_t Fdir_HardMask(bool in_flight);    /* monitors that latch in this regime */
+/* Operator clear (pad only; caller checks the phase): latch, active bits and
+ * persistence counts reset. Trip counters are kept for diagnosis. */
+void    Fdir_ClearLatch(Fdir *f);
 
 /* Control capability left after removing what the active monitors affect. */
 FdirCap Fdir_Capability(const Fdir *f);

@@ -47,6 +47,26 @@ class Parsers(unittest.TestCase):
         self.assertEqual(link.num("+ovf"), float("inf"))
 
 
+class FaultSummary(unittest.TestCase):
+    def test_priority_and_no_stuck_states(self):
+        bit = {n: 1 << i for i, n in enumerate(link.MONITORS)}
+        self.assertEqual(link.fault_summary(0, 0, "READY")[:2], ("none", "ok"))
+        self.assertEqual(link.fault_summary(bit["gps_link"], 0, "READY")[:2], ("gps_link advisory", "info"))
+        t, s, full = link.fault_summary(bit["gps_link"] | bit["est_tilt"], 0, "SETTLE")
+        self.assertEqual((t, s), ("est_tilt active  +1 more", "warn"))            # SOFT before INFO
+        t, s, full = link.fault_summary(bit["gps_link"] | bit["est_tilt"], bit["imu_read"], "LOCKOUT")
+        self.assertEqual(s, "bad")
+        self.assertTrue(t.startswith("imu_read latched"))                         # HARD first
+        self.assertEqual(full[0], "imu_read latched")
+        a = bit["imu_read"]
+        self.assertTrue(link.fault_summary(a, a, "LOCKOUT")[0].startswith("imu_read LATCHED"))
+        # LOCKOUT with nothing latched (watchdog reset / phase upset) is never "none".
+        self.assertEqual(link.fault_summary(0, 0, "LOCKOUT")[1], "bad")
+        self.assertEqual(link.fault_summary(0, 0xFFFFFFFF, "READY")[:2], ("LATCH CORRUPT", "bad"))
+        # overrun is HARD on the pad, SOFT in flight.
+        self.assertEqual(link.fault_summary(bit["overrun"], 0, "COAST")[1], "warn")
+
+
 class Demux(unittest.TestCase):
     def test_lines_split_anywhere(self):
         d = link.StreamDemux()
@@ -117,6 +137,11 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(any(link.parse_event(s) for s in self.lines))
         self.assertIn("build sim0000", self.ask("ver", (link.VER_PREFIX,)))
         self.assertTrue(self.ask("bogus", ("ERR",)).startswith("ERR unknown"))
+        self.ask("inject imu", ("inject imu",))
+        time.sleep(0.2)
+        self.assertEqual(self.dev.phase, "LOCKOUT")
+        self.assertEqual(self.ask("faults clear", ("faults clear:", "ERR")), "faults clear: OK")
+        self.assertEqual(self.dev.phase, "SETTLE")
         self.assertIn("bogus", self.lines)                      # firmware echo arrives as its own line
 
     def test_log_pull_decode(self):

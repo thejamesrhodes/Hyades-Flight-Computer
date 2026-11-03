@@ -48,6 +48,9 @@ bool        Phase_Transition(PhaseWord *w, Phase to);        /* false: refused  
 /* Safe-state entry used when the word itself is found corrupt: always
  * succeeds, landing in LOCKOUT (pad) or CATO_SAFE (in_flight). */
 void        Phase_ForceSafe(PhaseWord *w, bool in_flight);
+/* Operator recovery (console 'faults clear', pad only): LOCKOUT -> SETTLING,
+ * also from a corrupt word. Refuses every other phase, CATO_SAFE included. */
+bool        Phase_Recover(PhaseWord *w);
 
 uint8_t     Phase_Index(Phase p);        /* 0..PHASE_COUNT-1, 0xFF if invalid  */
 const char *Phase_Name(Phase p);

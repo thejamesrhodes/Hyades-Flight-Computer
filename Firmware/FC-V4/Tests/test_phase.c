@@ -97,6 +97,21 @@ static void test_actuation_policy(void)
     TEST_ASSERT_FALSE(Phase_InFlight(PH_CATO_SAFE));
 }
 
+static void test_recover_only_from_lockout(void)
+{
+    TEST_ASSERT_FALSE(Phase_Recover(&W));                            /* BOOT */
+    Phase_ForceSafe(&W, true);                                       /* CATO_SAFE */
+    TEST_ASSERT_FALSE(Phase_Recover(&W));
+    TEST_ASSERT_EQUAL_HEX16(PH_CATO_SAFE, now());
+    Phase_ForceSafe(&W, false);                                      /* LOCKOUT */
+    TEST_ASSERT_TRUE(Phase_Recover(&W));
+    TEST_ASSERT_EQUAL_HEX16(PH_SETTLING, now());
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_BOOST));               /* must pass READY first */
+    W.v ^= 0x4u;                                                     /* corrupt word */
+    TEST_ASSERT_TRUE(Phase_Recover(&W));
+    TEST_ASSERT_EQUAL_HEX16(PH_SETTLING, now());
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -108,5 +123,6 @@ int main(void)
     RUN_TEST(test_corruption_detected_and_refused);
     RUN_TEST(test_consistent_but_invalid_code_rejected);
     RUN_TEST(test_actuation_policy);
+    RUN_TEST(test_recover_only_from_lockout);
     return UNITY_END();
 }

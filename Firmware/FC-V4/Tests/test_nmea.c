@@ -1,5 +1,6 @@
 #include "unity.h"
 #include "nmea.h"
+#include "baud.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -98,6 +99,16 @@ static void test_alive_handles_tick_wrap(void)
     TEST_ASSERT_TRUE(Nmea_Alive(&G, 0x00000100u, 2500u));   /* 512 ms later, wrapped */
 }
 
+static void test_baud_snap(void)
+{
+    TEST_ASSERT_EQUAL_UINT32(9600u,   Baud_Snap(96000000u, 10000u));  /* one 104 us bit */
+    TEST_ASSERT_EQUAL_UINT32(9600u,   Baud_Snap(96000000u, 10900u));  /* polling jitter */
+    TEST_ASSERT_EQUAL_UINT32(115200u, Baud_Snap(96000000u, 833u));
+    TEST_ASSERT_EQUAL_UINT32(38400u,  Baud_Snap(96000000u, 2500u));
+    TEST_ASSERT_EQUAL_UINT32(0u,      Baud_Snap(96000000u, 7000u));   /* 13.7 kBd: not standard */
+    TEST_ASSERT_EQUAL_UINT32(0u,      Baud_Snap(96000000u, 0u));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -110,5 +121,6 @@ int main(void)
     RUN_TEST(test_overlong_line_dropped_then_recovers);
     RUN_TEST(test_other_sentences_counted_not_parsed);
     RUN_TEST(test_alive_handles_tick_wrap);
+    RUN_TEST(test_baud_snap);
     return UNITY_END();
 }
