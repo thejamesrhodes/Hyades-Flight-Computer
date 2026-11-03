@@ -50,23 +50,65 @@ static inline float biquad_step(const Controller *c, Biquad *s, float x)
     return y;
 }
 
+/* Set a unity-DC-gain biquad's state to its steady state for a constant input
+ * u, so the output starts at u (z1 = (1-b0)u, z2 = (b2-a2)u). */
+static void biquad_preload(const Controller *c, Biquad *s, float u)
+{
+    s->z1 = (1.0f - c->b0) * u;
+    s->z2 = (c->b2 - c->a2) * u;
+}
+
+static float clampf(float x, float lim)
+{
+    return (x > lim) ? lim : ((x < -lim) ? -lim : x);
+}
+
 void Ctrl_Init(Controller *c)
 {
-    c->active = false;
+    c->mode = CTRL_MODE_OFF;
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; c->omega_prev[i]=0.0f; }
-    for (int i=0;i<4;i++) { c->delta_f[i]=0.0f; }
+    for (int i=0;i<4;i++) { c->delta_f[i]=0.0f; c->fin_last[i]=0.0f; }
     for (int i=0;i<3;i++) { c->bq_wdot[i].z1=0.0f; c->bq_wdot[i].z2=0.0f; }
     for (int i=0;i<4;i++) { c->bq_delta[i].z1=0.0f; c->bq_delta[i].z2=0.0f; }
     biquad_design(c, CTRL_INDI_LPF_HZ, (float)FRAME_HZ);
 }
 
-void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
-                 float dt, float fin_out[4])
+void Ctrl_SetMode(Controller *c, CtrlMode mode)
 {
-    if (!c->active) {
-        /* Hold the difference reference current so wdot doesn't jump on enable. */
+    if (mode == c->mode) { return; }
+    c->mode = mode;
+    for (int i=0;i<3;i++) { c->e_I[i]=0.0f; biquad_preload(c, &c->bq_wdot[i], 0.0f); }
+    for (int i=0;i<4;i++) {
+        c->delta_f[i] = c->fin_last[i];
+        biquad_preload(c, &c->bq_delta[i], c->fin_last[i]);
+    }
+}
+
+/* Gyro-only rate damper: fin = -K * rate, per channel, clipped. */
+static void rate_damp(const float w[3], float fin_out[4])
+{
+#if CTRL_ENABLE_PITCHYAW
+    const float p = -CTRL_RD_GAIN_PITCHYAW * w[0];
+    const float y = -CTRL_RD_GAIN_PITCHYAW * w[1];
+#else
+    const float p = 0.0f, y = 0.0f;
+#endif
+    const float r = -CTRL_RD_GAIN_ROLL * w[2];
+    fin_out[0] = clampf( p + r, CTRL_FIN_LIMIT);   /* top    */
+    fin_out[1] = clampf( y + r, CTRL_FIN_LIMIT);   /* right  */
+    fin_out[2] = clampf(-p + r, CTRL_FIN_LIMIT);   /* bottom */
+    fin_out[3] = clampf(-y + r, CTRL_FIN_LIMIT);   /* left   */
+}
+
+void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
+                 const float gyro[3], float dt, float fin_out[4])
+{
+    if (c->mode != CTRL_MODE_FULL) {
+        if (c->mode == CTRL_MODE_RATE_DAMP) { rate_damp(gyro, fin_out); }
+        else { fin_out[0]=fin_out[1]=fin_out[2]=fin_out[3]=0.0f; }
+        /* Keep the rate-difference reference current for a bumpless FULL entry. */
         c->omega_prev[0]=omega[0]; c->omega_prev[1]=omega[1]; c->omega_prev[2]=omega[2];
-        fin_out[0]=fin_out[1]=fin_out[2]=fin_out[3]=0.0f;
+        for (int i=0;i<4;i++) { c->fin_last[i]=fin_out[i]; }
         return;
     }
     if (dt < 1e-6f) { dt = 1e-6f; }
@@ -130,10 +172,8 @@ void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
     /* delta_cmd = delta_f + increment, saturated per fin (INDI anti-windup:
      * the SATURATED command is fed back into the actuator filter below). */
     for (int i=0;i<4;i++) {
-        float cmd = c->delta_f[i] + dinc[i];
-        if      (cmd >  CTRL_FIN_LIMIT) cmd =  CTRL_FIN_LIMIT;
-        else if (cmd < -CTRL_FIN_LIMIT) cmd = -CTRL_FIN_LIMIT;
-        fin_out[i] = cmd;
+        fin_out[i] = clampf(c->delta_f[i] + dinc[i], CTRL_FIN_LIMIT);
+        c->fin_last[i] = fin_out[i];
     }
 
     /* ---- 4. update the filtered actuator estimate (delay-matched) ---------- */

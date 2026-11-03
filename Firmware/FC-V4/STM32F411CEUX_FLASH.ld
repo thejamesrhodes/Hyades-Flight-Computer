@@ -45,7 +45,9 @@ _Min_Stack_Size = 0x1000; /* required amount of stack (measured ~2.5 kB at -O2) 
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
-  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 512K
+  /* Application: sectors 0-4 (128 KB). Sectors 5-7 (0x08020000, 384 KB) are
+   * the flight log (board.h LOG_FLASH_*), never linked into. */
+  FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 128K
 }
 
 /* Sections */
@@ -57,6 +59,15 @@ SECTIONS
   {
     . = ALIGN(4);
     KEEP(*(.isr_vector)) /* Startup code */
+    . = ALIGN(4);
+  } >FLASH
+
+  /* Build ID (app.c g_build_id) at a fixed offset right after the vector
+   * table (0x08000198 on the F411): readable from the .bin by host tools. */
+  .build_id :
+  {
+    . = ALIGN(4);
+    KEEP(*(.build_id))
     . = ALIGN(4);
   } >FLASH
 

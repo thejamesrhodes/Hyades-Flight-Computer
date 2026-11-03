@@ -16,9 +16,17 @@
  *   G^+ is the closed-form pseudoinverse of the cruciform effectiveness matrix;
  *   this single operation is also the control allocation.
  *
- * PURE module: no I/O, no globals. Inputs are the attitude quaternion and the
- * bias-corrected body rate (both from the estimator); output is a normalised
- * fin vector [-1,+1]. Host-testable in isolation (no estimator dependency).
+ * MODES (degraded-mode ladder, h743_flight_architecture 4.1). Each step down
+ * depends on strictly fewer inputs; the mode is chosen by the fault arbiter:
+ *   CTRL_MODE_FULL      geometric outer loop + INDI     (estimator + gyro)
+ *   CTRL_MODE_RATE_DAMP fin = -K_rd * body rate, clipped (gyro only; survives
+ *                       an estimator failure)
+ *   CTRL_MODE_OFF       fins centred (passive stability; IMU lost / not armed)
+ * Entering FULL is bumpless: the INDI actuator filter is preloaded with the
+ * last command and the rate-difference reference with the current rate.
+ *
+ * PURE module: no I/O, no globals. Output is a normalised fin vector [-1,+1].
+ * Host-testable in isolation (no estimator dependency).
  *
  * Fins (cruciform, looking down the nose, body Z = roll axis out the nose):
  *   fin[0]=top(0deg) fin[1]=right(90) fin[2]=bottom(180) fin[3]=left(270)
@@ -39,8 +47,11 @@
 /* 2nd-order biquad state (Direct Form II transposed), per scalar channel. */
 typedef struct { float z1, z2; } Biquad;
 
+typedef enum { CTRL_MODE_OFF = 0, CTRL_MODE_RATE_DAMP, CTRL_MODE_FULL } CtrlMode;
+
 typedef struct {
-    bool  active;             /* false -> centred fins (no actuation)         */
+    CtrlMode mode;            /* set via Ctrl_SetMode() only                  */
+    float fin_last[4];        /* last output (for bumpless mode changes)      */
 
     /* outer-loop integral on the Lie algebra (anti-windup: norm-clamped) */
     float e_I[3];
@@ -55,16 +66,21 @@ typedef struct {
     float b0, b1, b2, a1, a2;
 } Controller;
 
-/* Initialise gains/filters from board.h. Starts inactive (centred fins). */
+/* Initialise gains/filters from board.h. Starts in CTRL_MODE_OFF. */
 void Ctrl_Init(Controller *c);
+
+/* Change mode. No-op if unchanged; otherwise resets the integral and prepares
+ * the INDI filters for a bumpless start from the last fin command. */
+void Ctrl_SetMode(Controller *c, CtrlMode mode);
 
 /* One control step.
  *   q              : attitude quaternion [w x y z], body->world (estimator)
- *   omega_radps    : bias-corrected body rate (rad/s)  (estimator s->omega)
+ *   omega_radps    : bias-corrected body rate (rad/s) from the estimator (FULL)
+ *   gyro_radps     : boot-bias-corrected raw gyro rate (rad/s)       (RATE_DAMP)
  *   dt             : seconds since last call
- *   fin_out[4]     : normalised fin commands [-1,+1]   (all zero when inactive)
+ *   fin_out[4]     : normalised fin commands [-1,+1]   (all zero in OFF)
  */
 void Ctrl_Update(Controller *c, const float q[4], const float omega_radps[3],
-                 float dt, float fin_out[4]);
+                 const float gyro_radps[3], float dt, float fin_out[4]);
 
 #endif /* CONTROL_H_ */

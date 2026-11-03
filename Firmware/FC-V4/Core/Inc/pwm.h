@@ -7,8 +7,8 @@
  *   PWM_CH5 = PB1  (TIM3_CH4)     PWM_CH6 = PB10 (TIM2_CH3)
  *
  * The four fins are PWM_CH3..PWM_CH6, i.e. fin index 0..3 -> CH3..CH6.
- * Timing/limits come from board.h (single source of truth); the misleading
- * SERVO_FREQ_HZ=250 vs 20 ms (50 Hz) split in the original header is removed.
+ * Timing/limits come from board.h (single source of truth). CH1/CH2 are
+ * configured (centred) but unused spare outputs.
  * ============================================================================ */
 #ifndef PWM_H_
 #define PWM_H_
@@ -25,9 +25,7 @@ typedef enum {
 
 void PWM_Init(void);
 
-void PWM_SetPulse(PWM_Channel ch, uint32_t pulse_us);
-void PWM_SetAngle(PWM_Channel ch, float angle_deg);     /* 0..180 -> MIN..MAX  */
-void PWM_SetNormalized(PWM_Channel ch, float value);    /* -1..+1 about centre */
+void PWM_SetPulse(PWM_Channel ch, uint32_t pulse_us);   /* clamped MIN..MAX    */
 
 /* Fin command: idx 0..3, norm in [-1,+1] -> centre +/- FIN_DEFLECT_DEG. */
 void PWM_SetFin(uint8_t fin_idx, float norm);

@@ -1,8 +1,10 @@
 /* ============================================================================
  * telemetry.h  —  Binary framed telemetry over USB CDC (for a PC/Web-Serial log)
  *
- * Replaces the printf text logger on the hot path. Fixed binary frames are
- * cheap to emit (no vsnprintf), self-synchronising, and trivial to parse.
+ * Selected with CFG_TELEM_BINARY = 1 (else the 5 Hz text status is sent).
+ * Fixed binary frames: cheap to emit, self-synchronising, trivial to parse.
+ * Frames go through the shared USB TX ring (usbio.c) and are dropped whole if
+ * it is full; console replies may appear between frames (resync on 0xAA55).
  *
  * FRAME (little-endian):
  *   +0  uint8  SYNC0 = 0xAA
@@ -50,7 +52,10 @@
 #define TELEM_H_MAG_APPLIED   (1u << 4)   /* mag update not gated              */
 #define TELEM_H_CTRL_ACTIVE  (1u << 5)
 #define TELEM_H_OVERRUN      (1u << 6)    /* previous frame overran            */
-#define TELEM_H_SETTLING     (1u << 7)    /* RUN settle window (no actuation)  */
+#define TELEM_H_SETTLING     (1u << 7)    /* not READY/flight (no actuation)   */
+#define TELEM_H_FAULT        (1u << 8)    /* any SOFT/HARD monitor active      */
+#define TELEM_H_LOCKOUT      (1u << 9)    /* LOCKOUT or CATO_SAFE latched      */
+#define TELEM_H_MODE_SHIFT   10u          /* bits 10-11: ctrl mode 0 OFF,1 RDAMP,2 FULL */
 
 typedef struct {
     uint32_t t_us;
@@ -66,17 +71,7 @@ typedef struct {
     uint16_t loop_us;
 } TelemState;
 
-/* Build a STATE frame and hand it to USB CDC. Non-blocking: if the endpoint is
- * busy the frame is dropped (counter incremented) and the loop is never stalled.
- * Returns true if queued. */
+/* Build a STATE frame and queue it. Non-blocking; returns false if dropped. */
 bool     Telem_SendState(const TelemState *st);
-
-/* Send a text line over USB CDC. Non-blocking: dropped (and counted) if the
- * endpoint is busy or USB is not enumerated. For the human-readable status
- * stream (CFG_TELEM_BINARY = 0). Copies into an internal buffer. */
-bool     Telem_SendText(const char *txt, uint32_t len);
-
-/* Count of frames dropped because USB was busy (diagnostics). */
-uint32_t Telem_Dropped(void);
 
 #endif /* TELEMETRY_H_ */

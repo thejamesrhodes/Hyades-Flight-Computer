@@ -1,11 +1,10 @@
 /* ============================================================================
  * iekf.c  —  Left-Invariant EKF (attitude + gyro bias)
  *
- * Sensors / noise
- *   Gyro  L3GD20    : eta_g = 0.03 dps/rtHz = 5.236e-4 rad/s/rtHz  -> q_angle
- *                     bias random walk -> q_bias  (board.h)
- *   Accel LSM303    : gravity-direction update (quasi-static), magnitude-gated
- *   Mag   LSM303    : field-direction update, magnitude-gated
+ * Sensors / noise (values in board.h, section 6)
+ *   Gyro  : angle random walk -> q_angle, bias random walk -> q_bias
+ *   Accel : gravity-direction update (quasi-static), magnitude-gated
+ *   Mag   : field-direction update, magnitude-gated (none on FC-V4)
  *
  * Error dynamics (derivation, body-frame / left-invariant error):
  *   q = q_hat (x) exp([d-theta]x),  w_hat = w_meas - b_hat
@@ -284,4 +283,26 @@ bool IEKF_UpdateMag(IEKF_State *s, const float mag_gauss[3])
 void IEKF_GetEuler(const IEKF_State *s, float *roll, float *pitch, float *yaw)
 {
     q_to_euler_deg(s->q, roll, pitch, yaw);
+}
+
+bool IEKF_IsFinite(const IEKF_State *s)
+{
+    for (int i=0;i<4;i++)                   { if (!isfinite(s->q[i]))    { return false; } }
+    for (int i=0;i<3;i++)                   { if (!isfinite(s->bias[i])) { return false; } }
+    for (int i=0;i<IEKF_N*IEKF_N;i++)       { if (!isfinite(s->P[i]))    { return false; } }
+    return true;
+}
+
+float IEKF_TiltVar(const IEKF_State *s)
+{
+    /* Attitude-error variance with the component about gravity removed:
+     * trace(P_th) - g^T P_th g, g = unit gravity direction in the body frame.
+     * Heading (rotation about g) is unobservable without a magnetometer and
+     * grows without bound, so only tilt is a meaningful health signal. */
+    float R[9]; q_to_R(s->q, R);
+    float g[3]; m3_T_mulvec(R, s->grav_ref, g);
+    float Pg[3];
+    for (int i=0;i<3;i++) { Pg[i] = s->P[i*IEKF_N+0]*g[0] + s->P[i*IEKF_N+1]*g[1] + s->P[i*IEKF_N+2]*g[2]; }
+    const float tr = s->P[0] + s->P[IEKF_N+1] + s->P[2*IEKF_N+2];
+    return tr - v3_dot(g, Pg);
 }

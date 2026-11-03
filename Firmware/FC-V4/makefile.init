@@ -1,0 +1,13 @@
+# Included first by the CubeIDE-generated Debug/makefile (runs in Debug/).
+# Writes Core/Inc/build_id.h with the git SHA (+ if the tree is dirty), only
+# when it changes, so the build ID tracks the commit (std E3). Without git on
+# PATH the ID is "nogit" and the build still succeeds.
+GIT_SHA := $(strip $(shell git -C .. rev-parse --short=8 HEAD 2>/dev/null))
+ifeq ($(GIT_SHA),)
+GIT_SHA := nogit
+endif
+GIT_DIRTY := $(if $(strip $(shell git -C .. status --porcelain --untracked-files=no -- . 2>/dev/null)),+,)
+BUILD_ID_LINE := \#define BUILD_GIT_SHA "$(GIT_SHA)$(GIT_DIRTY)"
+ifneq ($(BUILD_ID_LINE),$(file <../Core/Inc/build_id.h))
+$(file >../Core/Inc/build_id.h,$(BUILD_ID_LINE))
+endif

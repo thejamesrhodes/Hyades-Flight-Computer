@@ -3,3 +3,6 @@ Release/
 *.bak_*
 _backup*/
 build-host/
+Core/Inc/build_id.h
+Tools/logs/
+Tools/__pycache__/
