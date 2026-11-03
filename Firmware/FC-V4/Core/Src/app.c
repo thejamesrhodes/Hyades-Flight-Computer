@@ -498,17 +498,9 @@ static void cmd_tasks(uint32_t argc, char *argv[])
 static void gps_report(const char *pfx)
 {
     const GpsProbe *p = GPS_ProbeResult();
-    Con_Printf("%sGPS probe:", pfx);
-    for (uint32_t i = 0u; i < GPS_NPINS; i++) {
-        Con_Printf(" %s %s %lue", GPS_PinName(i), GPS_LevelName(p->level[i]), (unsigned long)p->edges[i]);
-        if (p->baud[i] != 0u) { Con_Printf(" ~%lu", (unsigned long)p->baud[i]); }
-        Con_Printf((i + 1u < GPS_NPINS) ? " |" : "\r\n");
-    }
-    Con_Printf("%sGPS port1 %lu Bd %lu B, port2 %lu Bd %lu B, %lu NMEA -> %s\r\n", pfx,
-               (unsigned long)GPS_PortBaud(1u), (unsigned long)GPS_PortBytes(1u),
-               (unsigned long)GPS_PortBaud(2u), (unsigned long)GPS_PortBytes(2u),
-               (unsigned long)GPS_Get()->sentences,
-               (GPS_Get()->sentences > 0u) ? "NMEA OK" : GPS_Advice());
+    Con_Printf("%sGPS probe: PA3(rx) %s %lue ~%lu Bd | PA2(tx) %s %lue -> %s\r\n", pfx,
+               GPS_LevelName(p->rx_level), (unsigned long)p->rx_edges, (unsigned long)p->rx_baud,
+               GPS_LevelName(p->tx_level), (unsigned long)p->tx_edges, GPS_Advice());
 }
 #endif
 
@@ -528,21 +520,59 @@ static void cmd_gps(uint32_t argc, char *argv[])
     Con_Printf("gps fix=%u sats=%u hdop=%s alt=%s m utc=%06lu  lat/lon(x1e4)=%s,%s\r\n",
                (unsigned)g->fix_quality, (unsigned)g->sats, Con_Fx(a, g->hdop, 1u), Con_Fx(b, g->alt_msl_m, 1u),
                (unsigned long)g->utc_hhmmss, Con_Fx(c, (float)(g->lat_deg * 1e4), 0u), Con_Fx(d, (float)(g->lon_deg * 1e4), 0u));
-    Con_Printf("    bytes=%lu nmea=%lu gga=%lu rmc=%lu cksum_err=%lu overrun=%lu  port1 %lu Bd %lu B, "
-               "port2 %lu Bd %lu B, baud retunes %lu\r\n",
+    Con_Printf("    bytes=%lu nmea=%lu gga=%lu rmc=%lu cksum_err=%lu overrun=%lu (USART2 %lu Bd)\r\n",
                (unsigned long)g->bytes, (unsigned long)g->sentences, (unsigned long)g->gga,
                (unsigned long)g->rmc, (unsigned long)g->cksum_err, (unsigned long)GPS_Overruns(),
-               (unsigned long)GPS_PortBaud(1u), (unsigned long)GPS_PortBytes(1u),
-               (unsigned long)GPS_PortBaud(2u), (unsigned long)GPS_PortBytes(2u), (unsigned long)GPS_Retunes());
+               (unsigned long)GPS_BAUD);
 #else
     (void)argc; (void)argv;
     Con_Printf("gps disabled (CFG_ENABLE_GPS 0)\r\n");
 #endif
 }
 
+/* Bench noise capture (Allan/GMWM): every ODR sample, raw counts, as binary
+ * IMU frames (telemetry.h). Leaves the flight loop for good — control and
+ * FDIR stop, fins centred, LEDs show LOCKOUT — and ends only with 'reboot'
+ * or a power cycle, so it can never be half-active in a flight state. Polls
+ * the sensor every ~1 ms (ODR 224 Hz); gaps show as ts jumps on the host. */
+static void imu_capture(void) __attribute__((noreturn));
+static void imu_capture(void)
+{
+    const Qmi8658 *d = IMU_Driver();
+    FlashLog_Stop();
+    PWM_CentreFins();
+    A.stream = false;
+    Con_Printf("IMUCAP v1 odr_mHz=%lu a_lsb_per_g=%lu g_lsb_per_dps_x1000=%lu ctrl=%02X %02X %02X %02X %02X %02X %02X "
+               "build=%s (binary IMU frames follow; 'reboot' to end)\r\n",
+               (unsigned long)(d->odr_hz * 1000.0f + 0.5f), (unsigned long)(d->a_lsb_per_g + 0.5f),
+               (unsigned long)(d->g_lsb_per_dps * 1000.0f + 0.5f), d->ctrl_rb[0], d->ctrl_rb[1], d->ctrl_rb[2],
+               d->ctrl_rb[3], d->ctrl_rb[4], d->ctrl_rb[5], d->ctrl_rb[6], g_build_id);
+    uint32_t next = Sched_MicrosNow();
+    for (;;) {
+        Wdg_Kick();
+        Con_Poll();                                   /* 'reboot' still works */
+        UsbIo_Task();
+        Leds_Update(PH_LOCKOUT, false, GPS_LED_NONE, HAL_GetTick());
+        if (A.reboot_req && ((int32_t)(HAL_GetTick() - A.reboot_at_ms) >= 0)) { NVIC_SystemReset(); }
+        if ((int32_t)(Sched_MicrosNow() - next) < 0) { continue; }
+        next += 1000u;
+        Qmi8658Raw r; uint32_t dts = 0u;
+        if (IMU_ReadRaw(&r, &dts) && (dts != 0u) && UsbIo_Connected()) {
+            (void)Telem_SendImu(r.ts, r.temp, r.a, r.g);
+        }
+    }
+}
+
 static void cmd_imu(uint32_t argc, char *argv[])
 {
-    (void)argc; (void)argv;
+    if ((argc >= 2u) && (strcmp(argv[1], "capture") == 0)) {
+        const Phase ph = phase_now();
+        static bool s_capturing;                       /* 'imu capture' typed again from inside */
+        if (s_capturing) { Con_Printf("ERR capture running ('reboot' to end)\r\n"); return; }
+        if (Phase_InFlight(ph) || (ph == PH_CATO_SAFE)) { Con_Printf("ERR not in flight\r\n"); return; }
+        s_capturing = true;
+        imu_capture();
+    }
     const Qmi8658 *d = IMU_Driver();
     char a[CON_FX_LEN], b[CON_FX_LEN], c[CON_FX_LEN];
     Con_Printf("imu QMI8658A whoami=0x%02X rev=0x%02X reads=%lu i2c_err=%lu torn=%lu/%lu stale=%lu\r\n",
@@ -631,7 +661,7 @@ static const ConCmd k_cmds[] = {
     { "faults", "[clear]                  FDIR monitors, latch; clear on pad",  cmd_faults },
     { "tasks",  "                         per-task timing (WCET)",             cmd_tasks  },
     { "gps",    "[raw|probe]              GNSS detail, last NMEA, wiring probe", cmd_gps    },
-    { "imu",    "                         IMU driver diagnostics",             cmd_imu    },
+    { "imu",    "[capture]                IMU diagnostics; raw noise capture (ends by reboot)", cmd_imu },
     { "log",    "[info|start|stop|erase|pull]  flight log (internal flash)",   cmd_log    },
     { "fw",     "<size> <crc32hex>        USB firmware update (fc_flash.py)",  cmd_fw     },
     { "reboot", "                         reset (not in flight)",              cmd_reboot },

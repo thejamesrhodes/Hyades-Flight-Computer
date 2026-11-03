@@ -29,12 +29,12 @@ ADVISORY = ("gps_link",)                             # SEV_INFO in fdir.c: repor
 MONITORS = ("imu_read", "accel_rng", "gyro_rng", "loop_time", "overrun", "est_nan", "est_tilt", "gps_link")
 COMMANDS = ("help", "ver", "stream on", "stream off", "faults", "tasks", "gps", "imu",
             "log info", "log start", "log stop", "log erase", "log pull", "reboot",
-            "faults clear", "gps raw", "gps probe",
+            "faults clear", "gps raw", "gps probe", "imu capture",
             "inject wdg", "inject phase", "inject imu")
 VER_PREFIX = "Hyades FC-V4"
 
 # Binary STATE frame (telemetry.h): AA 55 id len payload crc16(id,len,payload)
-SYNC0, SYNC1, MSG_STATE = 0xAA, 0x55, 0x01
+SYNC0, SYNC1, MSG_STATE, MSG_IMU = 0xAA, 0x55, 0x01, 0x02
 STATE = struct.Struct("<II4f3f3f3f3f3f4fHH")         # 104 bytes
 STATE_FIELDS = ("t_us", "frame", "qw", "qx", "qy", "qz", "roll", "pitch", "yaw", "wx", "wy", "wz",
                 "ax", "ay", "az", "mx", "my", "mz", "bx", "by", "bz", "f0", "f1", "f2", "f3",

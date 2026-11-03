@@ -6,7 +6,9 @@ GIT_SHA := $(strip $(shell git -C .. rev-parse --short=8 HEAD 2>/dev/null))
 ifeq ($(GIT_SHA),)
 GIT_SHA := nogit
 endif
-GIT_DIRTY := $(if $(strip $(shell git -C .. status --porcelain --untracked-files=no -- . 2>/dev/null)),+,)
+# Dirty tree: '+' plus 6 hex of a hash of the diff, so two uncommitted builds
+# with different code get different IDs (the USB flash check compares IDs).
+GIT_DIRTY := $(if $(strip $(shell git -C .. status --porcelain --untracked-files=no -- . 2>/dev/null)),+$(shell git -C .. diff HEAD -- . 2>/dev/null | git hash-object --stdin 2>/dev/null | head -c 6),)
 BUILD_ID_LINE := \#define BUILD_GIT_SHA "$(GIT_SHA)$(GIT_DIRTY)"
 ifneq ($(BUILD_ID_LINE),$(file <../Core/Inc/build_id.h))
 $(file >../Core/Inc/build_id.h,$(BUILD_ID_LINE))

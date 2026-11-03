@@ -21,6 +21,18 @@ static uint32_t put_fv (uint8_t *d, uint32_t o, const float *v, uint32_t n)
     return o + (n * 4u);
 }
 
+bool Telem_SendImu(uint32_t ts, int16_t temp, const int16_t a[3], const int16_t g[3])
+{
+    uint8_t f[4u + 18u + 2u];
+    f[0] = TELEM_SYNC0; f[1] = TELEM_SYNC1; f[2] = TELEM_MSG_IMU; f[3] = 18u;
+    uint32_t o = put_u32(f, 4u, ts);
+    o = put_u16(f, o, (uint16_t)temp);
+    for (uint32_t k = 0u; k < 3u; k++) { o = put_u16(f, o, (uint16_t)a[k]); }
+    for (uint32_t k = 0u; k < 3u; k++) { o = put_u16(f, o, (uint16_t)g[k]); }
+    o = put_u16(f, o, crc16_ccitt(&f[2], o - 2u));
+    return UsbIo_Write(f, o);
+}
+
 bool Telem_SendState(const TelemState *st)
 {
     uint8_t f[FRAME_MAX_LEN];

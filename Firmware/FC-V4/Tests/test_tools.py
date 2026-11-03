@@ -7,6 +7,7 @@ end to end against fc_sim: connect, command echo, log start/pull/decode,
 firmware update handshake with a real ELF image, reset and reconnect.
 """
 import binascii
+import json
 import os
 import struct
 import sys
@@ -162,6 +163,33 @@ class EndToEnd(unittest.TestCase):
         fc_pull.decode(raw, out)
         with open(os.path.join(out, "session1_state.csv")) as fh:
             self.assertGreater(len(fh.readlines()), 5)
+
+    def test_imu_capture_to_noise_fit(self):
+        """'imu capture' -> MSG_IMU frames -> .imu/.json (fc_imucap format) -> fc_noise recovers the white level."""
+        try:
+            import numpy  # noqa: F401
+        except ImportError:
+            self.skipTest("numpy not installed")
+        import fc_imucap
+        import fc_noise
+        frames = []
+        self.b.on_event = lambda kind, *a: frames.append(a[1]) if kind == "frame" and a[0] == link.MSG_IMU else None
+        line = self.ask("imu capture", ("IMUCAP", "ERR"))
+        self.assertTrue(line.startswith("IMUCAP"), line)
+        meta = fc_imucap.parse_imucap(line)
+        self.assertEqual((meta["gyro_fs_dps"], meta["accel_fs_g"], meta["lpf_pct_odr"]), (2048, 16, 13.37))
+        time.sleep(6.0)
+        self.assertEqual(self.ask("imu capture", ("ERR",)), "ERR capture running ('reboot' to end)")
+        stem = os.path.join(tempfile.mkdtemp(), "cap")
+        with open(stem + ".imu", "wb") as fh:
+            fh.write(b"".join(frames))
+        with open(stem + ".json", "w") as fh:
+            json.dump(meta, fh)
+        _meta, ts, _t, _a, g = fc_noise.load(stem)
+        self.assertGreater(len(ts), 1000)
+        c = fc_noise.analyse_channel(g[:, 0] / meta["g_lsb_per_dps"] * fc_noise.D2R, meta["odr_hz"],
+                                     fc_noise.D2R / meta["g_lsb_per_dps"])
+        self.assertAlmostEqual(c["N_meas"] / fc_sim.SimDevice.SIM_GYRO_N, 1.0, delta=0.15)
 
     def test_flash_and_reconnect(self):
         import fc_flash

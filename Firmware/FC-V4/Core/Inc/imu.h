@@ -39,6 +39,10 @@ void IMU_CalibrateGyro(GyroCal *gc);
 
 void IMU_ReadBody(const GyroCal *gc, ImuSample *out);
 
+/* Raw sensor counts (sensor frame), for the bench noise capture only.
+ * *dts = ODR ticks since the previous read (0 = no new sample). */
+bool IMU_ReadRaw(Qmi8658Raw *r, uint32_t *dts);
+
 /* Driver diagnostics (read counts, I2C errors, torn reads ...). */
 const Qmi8658 *IMU_Driver(void);
 
