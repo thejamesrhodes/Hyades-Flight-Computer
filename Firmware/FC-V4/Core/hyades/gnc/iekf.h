@@ -18,7 +18,7 @@
  *   from accel, field from mag), this mechanisation coincides with a correctly
  *   formulated body-frame MEKF; the dramatic IEKF gain (state-independent F for
  *   the velocity coupling) appears only on SE_2(3) with a velocity state, which
- *   needs an aiding source this airframe lacks (no GPS). Gyro bias also breaks
+ *   needs a velocity/position aiding source (GPS is status-only here). Gyro bias also breaks
  *   exact invariance ("imperfect IEKF"). So this is the invariant FORM, with
  *   the consistency benefit it can deliver here, and the propagate/update/reset
  *   boundary isolated so the error geometry can be swapped later (EqF, SE_2(3)).
@@ -89,5 +89,11 @@ bool IEKF_UpdateMag  (IEKF_State *s, const float mag_gauss[3]);
 
 /* Convenience: Euler angles (degrees, ZYX) for telemetry/navball. */
 void IEKF_GetEuler(const IEKF_State *s, float *roll, float *pitch, float *yaw);
+
+/* Health inputs for FDIR: every state and covariance element finite, and the
+ * TILT error variance (rad^2): trace(P_theta) minus the component about
+ * gravity, which is unobservable without a magnetometer. */
+bool  IEKF_IsFinite(const IEKF_State *s);
+float IEKF_TiltVar(const IEKF_State *s);
 
 #endif /* IEKF_H_ */

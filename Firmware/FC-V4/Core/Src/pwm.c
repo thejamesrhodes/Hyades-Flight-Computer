@@ -8,6 +8,7 @@
  * ============================================================================ */
 #include "pwm.h"
 #include "board.h"
+#include <math.h>
 
 extern TIM_HandleTypeDef htim2, htim3;
 
@@ -56,7 +57,7 @@ void PWM_Init(void)
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-    for (int i = 0; i < PWM_CH_COUNT; i++) { PWM_SetPulse((PWM_Channel)i, SERVO_CENTRE_US); }
+    for (uint32_t i = 0u; i < (uint32_t)PWM_CH_COUNT; i++) { PWM_SetPulse((PWM_Channel)i, SERVO_CENTRE_US); }
 }
 
 void PWM_SetPulse(PWM_Channel ch, uint32_t pulse_us)
@@ -67,31 +68,18 @@ void PWM_SetPulse(PWM_Channel ch, uint32_t pulse_us)
     __HAL_TIM_SET_COMPARE(pwm_map[ch].htim, pwm_map[ch].ch, pulse_us);
 }
 
-void PWM_SetAngle(PWM_Channel ch, float deg)
-{
-    if (deg < 0.0f) { deg = 0.0f; }
-    if (deg > SERVO_RANGE_DEG) { deg = SERVO_RANGE_DEG; }
-    PWM_SetPulse(ch, (uint32_t)((float)SERVO_MIN_US +
-        (deg / SERVO_RANGE_DEG) * (float)(SERVO_MAX_US - SERVO_MIN_US)));
-}
-
-void PWM_SetNormalized(PWM_Channel ch, float v)
-{
-    if (v < -1.0f) { v = -1.0f; }
-    if (v >  1.0f) { v =  1.0f; }
-    PWM_SetPulse(ch, (uint32_t)((float)SERVO_CENTRE_US +
-        v * (float)(SERVO_MAX_US - SERVO_CENTRE_US)));
-}
-
 /* Fin command: normalised [-1,+1] about SERVO_CENTRE_US, +/-1 = +/-FIN_DEFLECT_DEG. */
 void PWM_SetFin(uint8_t fin_idx, float norm)
 {
     if (fin_idx >= FIN_COUNT) { return; }
+    if (!isfinite(norm)) { norm = 0.0f; }              /* NaN would bypass the clamps */
     if (norm < -1.0f) { norm = -1.0f; }
     if (norm >  1.0f) { norm =  1.0f; }
     const float us_per_deg = (float)(SERVO_MAX_US - SERVO_MIN_US) / SERVO_RANGE_DEG;
-    PWM_SetPulse(fin_chan[fin_idx],
-                 (uint32_t)((float)SERVO_CENTRE_US + norm * FIN_DEFLECT_DEG * us_per_deg + 0.5f));
+    /* norm is clamped to [-1,1], so the pulse is within CENTRE +/- 200 us of
+     * a positive value before the float->uint cast (std A2 range check). */
+    const float us = (float)SERVO_CENTRE_US + (norm * FIN_DEFLECT_DEG * us_per_deg);
+    PWM_SetPulse(fin_chan[fin_idx], (us > 0.0f) ? (uint32_t)(us + 0.5f) : 0u);
 }
 
 /* Integer-only so it is also safe to call from fault handlers. */
