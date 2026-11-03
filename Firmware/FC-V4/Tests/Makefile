@@ -1,6 +1,7 @@
 # Host unit tests for the portable core (Core/hyades). Pure C, no HAL.
 #   make            build and run every test (non-zero exit on any failure)
-#   make tools      check Tools/fc_pull.py decodes firmware-packed records
+#   make tools      check Tools/fc_pull.py decodes firmware-packed records,
+#                   and test_tools.py (fc_link demux/parsers + simulator end to end)
 #   make clean
 # Same warning set as the firmware (software design guidelines E1).
 CC      ?= gcc
@@ -39,6 +40,7 @@ $(OUT):
 tools: $(OUT)/gen_log_fixture
 	$(OUT)/gen_log_fixture $(OUT)/fixture.bin
 	python3 tools_check.py $(OUT)/fixture.bin
+	python3 test_tools.py
 
 $(OUT)/gen_log_fixture: gen_log_fixture.c $(CORE)/svc/logrec.c $(CORE)/svc/crc.c | $(OUT)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
