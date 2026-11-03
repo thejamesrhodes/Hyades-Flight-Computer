@@ -159,8 +159,12 @@
  * mechanisation with a body-frame MEKF; the invariant error gives the
  * trajectory-independent propagation Jacobian. Same datasheet noise as before.
  * -------------------------------------------------------------------------- */
-#define IEKF_Q_ANGLE          2.269e-4f  /* QMI8658A 13 mdps/rtHz in rad/s/rtHz  */
-#define IEKF_Q_BIAS           1.0e-6f    /* gyro bias random walk               */
+/* INITIAL values: datasheet ARW 13 mdps/rtHz (quantisation at +/-2048 dps adds
+ * only ~1 % in variance at 224 Hz: (62.5 mdps)^2/12/224 Hz vs 13^2) and a
+ * generic consumer-MEMS bias walk. Replace both with fc_noise.py output from
+ * the overnight capture (README "IMU configuration and noise"). */
+#define IEKF_Q_ANGLE          2.269e-4f  /* rad/s/rtHz (ARW)                    */
+#define IEKF_Q_BIAS           1.0e-6f    /* rad/s/rts  (bias random walk)       */
 #define IEKF_R_ACCEL          4.0e-2f    /* accel dir update var (normalised)   */
 #define IEKF_R_MAG            5.0e-3f     /* mag   dir update var (normalised)   */
 #define IEKF_ACCEL_MIN        7.5f       /* |a| gate, m/s^2                     */
@@ -187,7 +191,7 @@
                                     /* 0 = human-readable status text over USB  */
 #define TEXT_STATUS_DECIMATE  20u   /* text status every N frames -> 5 Hz      */
 #define TELEM_DECIMATE        1u    /* binary STATE frame every N frames -> 100 Hz */
-#define CFG_ENABLE_GPS        1     /* ATGM336H NMEA, port 1 (PA10) or 2 (PA3)  */
+#define CFG_ENABLE_GPS        1     /* ATGM336H NMEA on USART2 (PA3), 9600 Bd   */
 #define GPS_TIMEOUT_MS        2500u /* no sentence for this long = GPS lost      */
 
 /* ----------------------------------------------------------------------------

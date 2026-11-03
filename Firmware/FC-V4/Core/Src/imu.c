@@ -121,4 +121,6 @@ void IMU_CalibrateGyro(GyroCal *gc)
     }
 }
 
+bool IMU_ReadRaw(Qmi8658Raw *r, uint32_t *dts) { return QMI8658_ReadLatest(&s_qmi, r, dts); }
+
 const Qmi8658 *IMU_Driver(void) { return &s_qmi; }

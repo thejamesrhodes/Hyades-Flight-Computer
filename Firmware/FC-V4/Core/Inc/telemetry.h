@@ -43,6 +43,7 @@
 #define TELEM_SYNC0     0xAAu
 #define TELEM_SYNC1     0x55u
 #define TELEM_MSG_STATE 0x01u
+#define TELEM_MSG_IMU   0x02u   /* raw IMU sample, 'imu capture' only (below) */
 
 /* health bit flags */
 #define TELEM_H_ACCEL_OK     (1u << 0)
@@ -73,5 +74,10 @@ typedef struct {
 
 /* Build a STATE frame and queue it. Non-blocking; returns false if dropped. */
 bool     Telem_SendState(const TelemState *st);
+
+/* MSG_ID 0x02 = IMU, payload 18 bytes, raw sensor counts, sensor frame:
+ *   0 u32 ts (sensor sample counter, 24-bit, +1 per ODR tick)  4 i16 temp
+ *   6 i16 a[3]   12 i16 g[3]          struct.Struct('<Ih3h3h')            */
+bool     Telem_SendImu(uint32_t ts, int16_t temp, const int16_t a[3], const int16_t g[3]);
 
 #endif /* TELEMETRY_H_ */

@@ -217,5 +217,5 @@ void OTG_FS_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-/* USART1/USART2 IRQ handlers live in gps.c (GPS on either port). */
+/* USART2_IRQHandler lives in gps.c (GPS). */
 /* USER CODE END 1 */

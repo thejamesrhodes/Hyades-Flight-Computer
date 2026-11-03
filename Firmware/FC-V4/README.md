@@ -63,18 +63,41 @@ the simulator, including the fw handshake with the real Debug ELF).
 
 ## GPS (ATGM336H)
 
-The board has two UART headers: port 1 = USART1 (RX PA10, TX PA15) and port 2
-= USART2 (RX PA3, TX PA2). The module is on **port 2**, as in the original V4
-firmware (the 2 Nov refactor had moved the driver to USART1, which is why it
-saw nothing). Both receivers now run, so either header works. At boot a probe
-reads every line with pull-up/pull-down (floating / held high / held low),
-counts edges and measures the bit time, and prints e.g.
+The module is on UART header 2: USART2, RX PA3 / TX PA2, 9600 Bd. The 2 Nov
+refactor had moved the driver to USART1 (PA10, header 1), which is why it saw
+nothing. At boot a probe reads PA3/PA2 with pull-up and pull-down (floating /
+held high / held low), counts edges and measures the bit time, e.g.
 
-    [BOOT] GPS probe: PA10 rx1 high 0e | PA15 tx1 float 0e | PA3 rx2 high 2180e ~9600 | PA2 tx2 high 0e
+    [BOOT] GPS probe: PA3(rx) high 1724e ~9600 Bd | PA2(tx) high 0e -> module transmitting
 
-A port that receives bytes that never parse as NMEA steps through the standard
-baud rates until they do. `gps` shows fix/sats/HDOP and per-port bytes and
-baud, `gps raw` the last NMEA lines, `gps probe` the boot probe again.
+`gps` shows fix/sats/HDOP and counters, `gps raw` the last NMEA lines,
+`gps probe` the boot probe again.
+
+## IMU configuration and noise characterisation
+
+QMI8658A: +/-16 g, +/-2048 dps, ODR 224.2 Hz, sensor LPF 13.37 % ODR (~30 Hz),
+newest coherent sample read each 10 ms frame. Fixed for flight:
+- +/-2048 dps: CDS-01 shows ~25.8 rad/s (1480 dps) standing roll without trim;
+  +/-16 g for boost. LSB 62.5 mdps / 0.49 mg.
+- 224 Hz / ~30 Hz LPF: anti-alias for the 100 Hz frame; higher ODR raises the
+  torn-read rate of the 0.68 ms I2C burst, and the FIFO loses samples on this
+  part (see qmi8658.h).
+Quantisation of the rate register is white (Allan deviation slope -1/2, not
+the -1 of angle quantisation): Delta^2/12 per sample adds to the white level.
+
+Capture (board still, ideally overnight; console closed):
+
+    python Tools/fc_imucap.py --hours 8 --note "bench, flat, room 19 C"
+    python Tools/fc_noise.py Tools/logs/imucap/<time> --fig
+
+`imu capture` makes the firmware leave the flight loop (fins centred, LEDs
+LOCKOUT) and stream every ODR sample as raw counts with the sensor's sample
+counter; it ends with `reboot` (done by the script). `fc_noise.py` gives the
+overlapping Allan deviation, the measured and quantisation-corrected
+(Sheppard) white levels, a WN+GM+RW fit to the Allan variance, the gyro bias
+tempco, and the `IEKF_Q_ANGLE` / `IEKF_Q_BIAS` values for board.h plus the
+sensor-noise floor of `IEKF_R_ACCEL` (R itself must stay larger: it also has
+to cover non-gravitational acceleration from handling and vibration).
 
 ## Faults
 
@@ -94,7 +117,9 @@ Both alternating: LOCKOUT / CATO_SAFE (fins centred). Both solid: CPU fault.
 
 `cd Tests && make` builds and runs the Unity host tests for the whole core
 (same `-Werror` warning set as the firmware). `make tools` checks that
-`Tools/fc_pull.py` decodes records packed by the firmware's own code.
+`Tools/fc_pull.py` decodes records packed by the firmware's own code, and
+runs `test_tools.py` (link, parsers, simulator end to end, IMU capture -> noise
+fit) and `fc_noise.py --selftest` needs numpy.
 
 ## Safety behaviour (bench-verified, 2026-11-03)
 

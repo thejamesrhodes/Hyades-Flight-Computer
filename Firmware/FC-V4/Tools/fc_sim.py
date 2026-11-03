@@ -19,7 +19,8 @@ import threading
 import time
 import zlib
 
-from fc_link import MONITORS, PHASES, STATE, SYNC0, SYNC1, MSG_STATE
+from fc_link import MONITORS, PHASES, STATE, SYNC0, SYNC1, MSG_STATE, MSG_IMU
+import random
 
 BUILD = "sim0000"
 LOG_CAP = 384 * 1024
@@ -66,6 +67,7 @@ class SimDevice:
         self.frame = 0
         self.banner_sent = False
         self.settle_t = 0.0
+        self.capture = False
 
     def _emit(self, s: str | bytes) -> None:
         """Caller holds the lock."""
@@ -148,6 +150,9 @@ class SimDevice:
                     self._go("LOCKOUT")
                     self.mode = "OFF"
                 self.frame += 2
+                if self.capture:
+                    self._capture_tick()
+                    continue
                 if self.fw_want >= 0:
                     continue                                    # firmware is busy receiving
                 roll, pitch, yaw = 3 * math.sin(t * 0.7), 2 * math.sin(t * 0.4), (t * 5) % 360 - 180
@@ -179,6 +184,28 @@ class SimDevice:
                         f"|a|={_fx(1.0, 2)} fin {' '.join(_fx(f, 2) for f in fins)} "
                         f"imu={'FAIL' if self.imu_fail else 'OK'}({int(self.imu_fail)}) loop=910 ovr={self.ovr} "
                         f"gps={gps} s0 alt=+0.0 rx=0 nmea=0 log={len(self.log) * 100 // LOG_CAP}%")
+
+    # -- 'imu capture': synthetic white + random-walk gyro, white accel, 16-bit counts
+    SIM_ODR = 224.2
+    SIM_GYRO_N = 2.3e-4        # rad/s/sqrt(Hz)
+    SIM_ACC_N = 1.5e-3         # m/s^2/sqrt(Hz)
+
+    def _capture_tick(self) -> None:
+        now = time.monotonic()
+        due = int((now - self.cap_t0) * self.SIM_ODR) - self.cap_n
+        g_lsb = 16.0                                      # LSB/dps at +/-2048 dps
+        a_lsb = 2048.0                                    # LSB/g at +/-16 g
+        sg = self.SIM_GYRO_N * (self.SIM_ODR ** 0.5) * 57.29578 * g_lsb
+        sa = self.SIM_ACC_N * (self.SIM_ODR ** 0.5) / 9.80665 * a_lsb
+        for _ in range(max(0, due)):
+            self.cap_n += 1
+            self.cap_rw += random.gauss(0.0, 0.002)
+            g = [int(round(random.gauss(5.0 + self.cap_rw, sg))) for _ in range(3)]
+            a = [int(round(random.gauss(0.0, sa))), int(round(random.gauss(0.0, sa))),
+                 int(round(random.gauss(a_lsb, sa)))]
+            pay = struct.pack("<Ih3h3h", self.cap_n & 0xFFFFFF, 25 * 256, *a, *g)
+            body = bytes([MSG_IMU, len(pay)]) + pay
+            self._emit(bytes([SYNC0, SYNC1]) + body + struct.pack("<H", binascii.crc_hqx(body, 0xFFFF)))
 
     # -- input ----------------------------------------------------------------
     def rx(self, data: bytes) -> None:
@@ -273,6 +300,14 @@ class SimDevice:
         elif cmd == "gps":
             self._say("gps fix=0 sats=0 hdop=+99.9 alt=+0.0 m utc=000000  lat/lon(x1e4)=+0,+0")
             self._say("    bytes=0 nmea=0 gga=0 rmc=0 bad=0 overrun=0")
+        elif cmd == "imu" and arg == "capture":
+            if self.capture:
+                self._say("ERR capture running ('reboot' to end)")
+                return
+            self.capture, self.cap_t0, self.cap_n, self.cap_rw = True, time.monotonic(), 0, 0.0
+            self.stream = False
+            self._say("IMUCAP v1 odr_mHz=224200 a_lsb_per_g=2048 g_lsb_per_dps_x1000=16000 "
+                      "ctrl=40 35 75 00 77 00 03 build=sim0000 (binary IMU frames follow; 'reboot' to end)")
         elif cmd == "imu":
             self._say("imu QMI8658A whoami=0x05 rev=0x7C reads=1234 i2c_err=0 torn=0/0 stale=0")
         elif cmd == "log":
