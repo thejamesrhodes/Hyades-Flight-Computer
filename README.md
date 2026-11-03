@@ -132,6 +132,14 @@ On this version, the MCU boots and runs, USB and PDB works completely. An incorr
 <img src="Documentation/Images/Avionics_Boards.jpg" width="450" alt="Bare boards">
 </p>
 
+After some more testing, I have realised that the supposed ICM-42688-P's are actually QMI8658A gyroscopes, seemingly substituted as a fake version of the target gyros (cross referenced address of 0x6B), after rewriting some of the code I got them working, allowing for a breakout board/bodge to be avoided. After collecting 2+ hours of data running at 16 g, 2048 dps, 224.2~ Hz ODR over I2C at 400kHz, I computed allan variance and then fitted GMWM + WN + RW + Quantisation to it.
+
+<img src="Firmware/FC-V4/Docs/noise/20261103-201033_gyro_adev.png" width="900" alt="QMI8658A gyro overlapping Allan deviation, x/y/z, 2.46 h static capture, with WN+GM+RW fit and rate-quantisation share">
+
+<img src="Firmware/FC-V4/Docs/noise/20261103-201033_accel_adev.png" width="900" alt="QMI8658A accelerometer overlapping Allan deviation, x/y/z, 2.46 h static capture, with WN+GM+RW fit and quantisation share">
+
+This is beneficial as the state estimator (IEKF) requires a model of the sensors noise to optimally estimate the current pose and to make its covariance trustworthy, which fault detection partly relies on. See [Quantisation Research Project](https://github.com/thejamesrhodes/IMU-Quantisation-research-project) for my related work on this topic.
+
 ---
 
 ## Flight Hardware Design
