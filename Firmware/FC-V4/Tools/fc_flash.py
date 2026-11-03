@@ -30,7 +30,8 @@ BUILD_ID_OFFSET = 0x198                    # .build_id right after the F411 vect
 
 def elf_to_image(path: str) -> bytes:
     """Concatenate PT_LOAD segments by physical (load) address into one image."""
-    data = open(path, "rb").read()
+    with open(path, "rb") as fh:
+        data = fh.read()
     if data[:4] != b"\x7fELF" or data[4] != 1 or data[5] != 1:
         fc.die(f"{path}: not a 32-bit little-endian ELF")
     e_phoff, = struct.unpack_from("<I", data, 28)
