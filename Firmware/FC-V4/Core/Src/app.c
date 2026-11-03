@@ -78,6 +78,7 @@ static struct {
     bool       stream;           /* periodic status / telemetry on USB */
     bool       erase_req, reboot_req;
     bool       inject_imu;       /* fault injection: force IMU read failures */
+    bool       clear_req;        /* console 'faults clear', served by task_fdir */
     const char *reset_cause;
     uint32_t   reboot_at_ms;
     uint32_t   last_active;      /* FDIR active bits last frame (for events) */
@@ -136,6 +137,8 @@ static void go_phase(Phase to)
         }
     }
 }
+
+static void faults_clear_serve(Phase ph);   /* console command, served in task_fdir */
 
 static uint16_t fault_bits(void)
 {
@@ -208,6 +211,10 @@ static void task_fdir(void)
         event(on ? EV_TRIP : EV_CLEAR, i, t);
     }
     A.last_active = A.fdir.active;
+    if (A.clear_req) {                            /* operator clear, after this frame's evaluation */
+        faults_clear_serve(ph);
+        ph = phase_now();
+    }
 
     /* --- arbiter: phase --- */
     const FdirSev worst = Fdir_Worst(&A.fdir, fl);
@@ -421,9 +428,45 @@ static void cmd_stream(uint32_t argc, char *argv[])
     Con_Printf("stream %s\r\n", A.stream ? "on" : "off");
 }
 
+/* Operator reset of latched faults (pad only). LOCKOUT is otherwise terminal
+ * until reboot; this is the console equivalent of that reboot, without losing
+ * the calibration. Refused in flight/CATO, and while any HARD monitor is still
+ * failing (the cause must be gone first). Re-entry is via SETTLE, so READY
+ * again needs the full fault-free hold. Bench fault injection is cancelled. */
+static void faults_clear_request(void)
+{
+    const Phase ph = phase_now();
+    if (Phase_InFlight(ph) || (ph == PH_CATO_SAFE)) { Con_Printf("ERR not in flight\r\n"); return; }
+#if CFG_FAULT_INJECTION
+    A.inject_imu = false;                 /* bench injection ends; its monitor recovers next frame */
+#endif
+    A.clear_req = true;
+}
+
+/* Called from task_fdir after this frame's monitors have run, so "still
+ * failing" means failing now, not one frame ago. */
+static void faults_clear_serve(Phase ph)
+{
+    A.clear_req = false;
+    if (Phase_InFlight(ph) || (ph == PH_CATO_SAFE)) { Con_Printf("ERR not in flight\r\n"); return; }
+    const uint32_t hard_active = A.fdir.active & Fdir_HardMask(false);
+    if (hard_active != 0u) {
+        Con_Printf("ERR faults still active (%02lX): fix the cause first\r\n", (unsigned long)hard_active);
+        return;
+    }
+    Fdir_ClearLatch(&A.fdir);
+    A.last_active = A.fdir.active;
+    if (ph == PH_LOCKOUT) {
+        if (!Phase_Recover(&A.ph)) { Con_Printf("ERR phase recover refused\r\n"); return; }
+        A.ready_hold = 0u;
+    }
+    event(EV_CLEAR, 0u, "faults cleared (operator)");
+    Con_Printf("faults clear: OK\r\n");
+}
+
 static void cmd_faults(uint32_t argc, char *argv[])
 {
-    (void)argc; (void)argv;
+    if ((argc >= 2u) && (strcmp(argv[1], "clear") == 0)) { faults_clear_request(); return; }
     uint32_t l = 0u;
     const bool ok = Fdir_LatchRead(&A.fdir, &l);
     Con_Printf("phase %s  ctrl %s  latch %s%08lX\r\n", Phase_Name(phase_now()), mode_name(A.ctrl.mode),
@@ -450,17 +493,51 @@ static void cmd_tasks(uint32_t argc, char *argv[])
                (unsigned long)A.overruns, (unsigned long)UsbIo_TxDropped(), (unsigned long)UsbIo_RxDropped());
 }
 
+#if CFG_ENABLE_GPS
+/* Wiring/traffic diagnosis from the boot probe, plus what has arrived since. */
+static void gps_report(const char *pfx)
+{
+    const GpsProbe *p = GPS_ProbeResult();
+    Con_Printf("%sGPS probe:", pfx);
+    for (uint32_t i = 0u; i < GPS_NPINS; i++) {
+        Con_Printf(" %s %s %lue", GPS_PinName(i), GPS_LevelName(p->level[i]), (unsigned long)p->edges[i]);
+        if (p->baud[i] != 0u) { Con_Printf(" ~%lu", (unsigned long)p->baud[i]); }
+        Con_Printf((i + 1u < GPS_NPINS) ? " |" : "\r\n");
+    }
+    Con_Printf("%sGPS port1 %lu Bd %lu B, port2 %lu Bd %lu B, %lu NMEA -> %s\r\n", pfx,
+               (unsigned long)GPS_PortBaud(1u), (unsigned long)GPS_PortBytes(1u),
+               (unsigned long)GPS_PortBaud(2u), (unsigned long)GPS_PortBytes(2u),
+               (unsigned long)GPS_Get()->sentences,
+               (GPS_Get()->sentences > 0u) ? "NMEA OK" : GPS_Advice());
+}
+#endif
+
 static void cmd_gps(uint32_t argc, char *argv[])
 {
-    (void)argc; (void)argv;
+#if CFG_ENABLE_GPS
+    if ((argc >= 2u) && (strcmp(argv[1], "raw") == 0)) {
+        const char *ln[GPS_RAW_LINES];
+        const uint32_t n = GPS_RawLines(ln);
+        if (n == 0u) { Con_Printf("gps raw: no NMEA lines received\r\n"); }
+        for (uint32_t k = 0u; k < n; k++) { Con_Printf("  %s\r\n", ln[k]); }
+        return;
+    }
+    if ((argc >= 2u) && (strcmp(argv[1], "probe") == 0)) { gps_report(""); return; }
     const GpsData *g = GPS_Get();
     char a[CON_FX_LEN], b[CON_FX_LEN], c[CON_FX_LEN], d[CON_FX_LEN];
     Con_Printf("gps fix=%u sats=%u hdop=%s alt=%s m utc=%06lu  lat/lon(x1e4)=%s,%s\r\n",
                (unsigned)g->fix_quality, (unsigned)g->sats, Con_Fx(a, g->hdop, 1u), Con_Fx(b, g->alt_msl_m, 1u),
                (unsigned long)g->utc_hhmmss, Con_Fx(c, (float)(g->lat_deg * 1e4), 0u), Con_Fx(d, (float)(g->lon_deg * 1e4), 0u));
-    Con_Printf("    bytes=%lu nmea=%lu gga=%lu rmc=%lu bad=%lu overrun=%lu\r\n",
+    Con_Printf("    bytes=%lu nmea=%lu gga=%lu rmc=%lu cksum_err=%lu overrun=%lu  port1 %lu Bd %lu B, "
+               "port2 %lu Bd %lu B, baud retunes %lu\r\n",
                (unsigned long)g->bytes, (unsigned long)g->sentences, (unsigned long)g->gga,
-               (unsigned long)g->rmc, (unsigned long)g->cksum_err, (unsigned long)GPS_Overruns());
+               (unsigned long)g->rmc, (unsigned long)g->cksum_err, (unsigned long)GPS_Overruns(),
+               (unsigned long)GPS_PortBaud(1u), (unsigned long)GPS_PortBytes(1u),
+               (unsigned long)GPS_PortBaud(2u), (unsigned long)GPS_PortBytes(2u), (unsigned long)GPS_Retunes());
+#else
+    (void)argc; (void)argv;
+    Con_Printf("gps disabled (CFG_ENABLE_GPS 0)\r\n");
+#endif
 }
 
 static void cmd_imu(uint32_t argc, char *argv[])
@@ -551,9 +628,9 @@ static const ConCmd k_cmds[] = {
     { "help",   "                         this list",                          cmd_help   },
     { "ver",    "                         build id",                           cmd_ver    },
     { "stream", "[on|off]                 periodic status/telemetry",          cmd_stream },
-    { "faults", "                         FDIR monitors, latch, phase",        cmd_faults },
+    { "faults", "[clear]                  FDIR monitors, latch; clear on pad",  cmd_faults },
     { "tasks",  "                         per-task timing (WCET)",             cmd_tasks  },
-    { "gps",    "                         GNSS detail",                        cmd_gps    },
+    { "gps",    "[raw|probe]              GNSS detail, last NMEA, wiring probe", cmd_gps    },
     { "imu",    "                         IMU driver diagnostics",             cmd_imu    },
     { "log",    "[info|start|stop|erase|pull]  flight log (internal flash)",   cmd_log    },
     { "fw",     "<size> <crc32hex>        USB firmware update (fc_flash.py)",  cmd_fw     },
@@ -577,26 +654,32 @@ static const char *reset_cause(uint32_t csr)
 }
 
 #if CFG_ENABLE_BOOTVERIFY
-/* Run the FULL control path on synthetic attitude errors (scratch controller,
- * no servo motion) and log the fins, to check signs/order. Expected for a
- * +error: +pitch(X) top -, bottom +; +yaw(Y) right -, left +; +roll(Z) all -.
- * With CTRL_ENABLE_PITCHYAW = 0 the pitch/yaw rows must read zero. */
+/* Run the FULL control path on synthetic inputs (scratch controller, no servo
+ * motion) and log the fins, to check signs/order. Attitude cases respond only
+ * through CTRL_KR_* (zero = rate-only tuning, rows read zero); the rate case
+ * exercises CTRL_KW_ROLL. Expected for a + input: +pitch(X) top -, bottom +;
+ * +yaw(Y) right -, left +; +roll(Z) all -; +roll rate all -. With
+ * CTRL_ENABLE_PITCHYAW = 0 the pitch/yaw rows must read zero. */
 static void boot_verify(void)
 {
-    Con_Printf("[BOOT] control-path check, fins 0=top 1=right 2=bottom 3=left\r\n");
+    Con_Printf("[BOOT] control-path check (KR roll %s, KW roll %s), fins 0=top 1=right 2=bottom 3=left\r\n",
+               (CTRL_KR_ROLL != 0.0f) ? "on" : "0", (CTRL_KW_ROLL != 0.0f) ? "on" : "0");
     const float d = 0.20f, c = cosf(0.5f * d), sn = sinf(0.5f * d);
-    const float w0[3] = { 0.0f, 0.0f, 0.0f };
-    const struct { const char *name; float q[4]; } cases[3] = {
-        { "+pitch(X)", { c, sn, 0.0f, 0.0f } },
-        { "+yaw(Y)  ", { c, 0.0f, sn, 0.0f } },
-        { "+roll(Z) ", { c, 0.0f, 0.0f, sn } },
+    const struct { const char *name; float q[4]; float w[3]; } cases[4] = {
+        { "+pitch(X) ", { c, sn, 0.0f, 0.0f },       { 0.0f, 0.0f, 0.0f } },
+        { "+yaw(Y)   ", { c, 0.0f, sn, 0.0f },       { 0.0f, 0.0f, 0.0f } },
+        { "+roll(Z)  ", { c, 0.0f, 0.0f, sn },       { 0.0f, 0.0f, 0.0f } },
+        { "+roll rate", { 1.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } },
     };
-    for (uint32_t k = 0u; k < 3u; k++) {
+    for (uint32_t k = 0u; k < 4u; k++) {
         Controller s;
         Ctrl_Init(&s);
-        Ctrl_SetMode(&s, CTRL_MODE_FULL);
         float fin[4];
-        Ctrl_Update(&s, cases[k].q, w0, w0, FRAME_DT_S, fin);
+        /* One OFF step sets the rate reference (as in flight), so the FULL step
+         * sees a steady rate, not a spurious angular-acceleration spike. */
+        Ctrl_Update(&s, cases[k].q, cases[k].w, cases[k].w, FRAME_DT_S, fin);
+        Ctrl_SetMode(&s, CTRL_MODE_FULL);
+        Ctrl_Update(&s, cases[k].q, cases[k].w, cases[k].w, FRAME_DT_S, fin);
         char b[4][CON_FX_LEN];
         Con_Printf("[BOOT]   %s fins %s %s %s %s\r\n", cases[k].name, Con_Fx(b[0], fin[0], 3u),
                    Con_Fx(b[1], fin[1], 3u), Con_Fx(b[2], fin[2], 3u), Con_Fx(b[3], fin[3], 3u));
@@ -650,19 +733,11 @@ static void boot(UART_HandleTypeDef *huart)
     Con_Printf("[BOOT] log %lu/%lu B used. Type 'help' for commands.\r\n",
                (unsigned long)FlashLog_UsedBytes(), (unsigned long)FlashLog_CapacityBytes());
 
+    (void)huart;                                      /* GPS ports are set up by gps.c */
 #if CFG_ENABLE_GPS
-    GPS_Init(huart);
-    uint32_t e10 = 0u, e15 = 0u;
-    GPS_LineActivity(1100u, &e10, &e15);
+    GPS_Init(1100u);                                  /* blocking probe: before the IWDG */
     GPS_Poll(4096u);
-    Con_Printf("[BOOT] GPS edges PA10(RX)=%lu PA15=%lu, %lu B, %lu NMEA%s\r\n",
-               (unsigned long)e10, (unsigned long)e15, (unsigned long)GPS_Get()->bytes,
-               (unsigned long)GPS_Get()->sentences,
-               ((e10 == 0u) && (e15 > 0u)) ? " -> TX/RX CROSSED, swap the wires"
-               : ((e10 == 0u) ? " -> no signal: check module TX wire and GND"
-               : ((GPS_Get()->sentences == 0u) ? " -> edges but no NMEA: baud?" : "")));
-#else
-    (void)huart;
+    gps_report("[BOOT] ");
 #endif
 
     if (!IMU_Init(A.hi2c)) {

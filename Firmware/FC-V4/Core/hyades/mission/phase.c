@@ -64,6 +64,15 @@ bool Phase_Transition(PhaseWord *w, Phase to)
     return true;
 }
 
+bool Phase_Recover(PhaseWord *w)
+{
+    Phase from;
+    if (!Phase_Read(w, &from)) { from = PH_LOCKOUT; }   /* corrupt word -> pad-safe anyway */
+    if (from != PH_LOCKOUT) { return false; }
+    store(w, PH_SETTLING);
+    return true;
+}
+
 void Phase_ForceSafe(PhaseWord *w, bool in_flight)
 {
     store(w, in_flight ? PH_CATO_SAFE : PH_LOCKOUT);

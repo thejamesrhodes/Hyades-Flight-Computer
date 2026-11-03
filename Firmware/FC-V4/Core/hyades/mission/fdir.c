@@ -64,6 +64,22 @@ bool Fdir_Eval(Fdir *f, MonId id, float r, bool in_flight)
     return true;
 }
 
+uint32_t Fdir_HardMask(bool in_flight)
+{
+    uint32_t m = 0u;
+    for (uint32_t i = 0u; i < (uint32_t)MON_COUNT; i++) {
+        if ((in_flight ? k_mon[i].sev_flight : k_mon[i].sev_pad) == (uint8_t)SEV_HARD) { m |= 1u << i; }
+    }
+    return m;
+}
+
+void Fdir_ClearLatch(Fdir *f)
+{
+    for (uint32_t i = 0u; i < (uint32_t)MON_COUNT; i++) { f->count[i] = 0u; }
+    f->active = 0u;                           /* monitors re-trip on the next frame if still failing */
+    f->latch = 0u; f->latch_inv = ~0u;
+}
+
 FdirSev Fdir_Worst(const Fdir *f, bool in_flight)
 {
     uint32_t l;

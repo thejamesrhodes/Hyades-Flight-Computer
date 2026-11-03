@@ -187,7 +187,7 @@
                                     /* 0 = human-readable status text over USB  */
 #define TEXT_STATUS_DECIMATE  20u   /* text status every N frames -> 5 Hz      */
 #define TELEM_DECIMATE        1u    /* binary STATE frame every N frames -> 100 Hz */
-#define CFG_ENABLE_GPS        1     /* ATGM336H NMEA on USART1 (PA10/PA15)      */
+#define CFG_ENABLE_GPS        1     /* ATGM336H NMEA, port 1 (PA10) or 2 (PA3)  */
 #define GPS_TIMEOUT_MS        2500u /* no sentence for this long = GPS lost      */
 
 /* ----------------------------------------------------------------------------

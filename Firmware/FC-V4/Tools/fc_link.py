@@ -29,6 +29,7 @@ ADVISORY = ("gps_link",)                             # SEV_INFO in fdir.c: repor
 MONITORS = ("imu_read", "accel_rng", "gyro_rng", "loop_time", "overrun", "est_nan", "est_tilt", "gps_link")
 COMMANDS = ("help", "ver", "stream on", "stream off", "faults", "tasks", "gps", "imu",
             "log info", "log start", "log stop", "log erase", "log pull", "reboot",
+            "faults clear", "gps raw", "gps probe",
             "inject wdg", "inject phase", "inject imu")
 VER_PREFIX = "Hyades FC-V4"
 
@@ -55,6 +56,53 @@ def num(tok: str) -> float:
 
 def fault_names(mask: int) -> list[str]:
     return [n for i, n in enumerate(MONITORS) if (mask >> i) & 1]
+
+
+# Severity per monitor (fdir.c k_mon: sev_pad, sev_flight). HARD latches and
+# forces LOCKOUT/CATO; SOFT degrades (READY -> SETTLE, control ladder); INFO is
+# reported only.
+SEV = {"imu_read": ("HARD", "HARD"), "accel_rng": ("SOFT", "SOFT"), "gyro_rng": ("SOFT", "SOFT"),
+       "loop_time": ("SOFT", "SOFT"), "overrun": ("HARD", "SOFT"), "est_nan": ("HARD", "SOFT"),
+       "est_tilt": ("SOFT", "SOFT"), "gps_link": ("INFO", "INFO")}
+
+
+def fault_summary(active: int, latched: int, phase: str = "") -> tuple[str, str, list[str]]:
+    """One line for a small status tile, most severe first, never 'stuck'.
+
+    Returns (text, style, full list). Order: corrupt latch; latched and still
+    failing; latched (cause gone, needs 'faults clear' or a reboot); SOFT
+    active; INFO active. style: bad (LOCKOUT-class), warn (degraded), info
+    (advisory only), ok. A LOCKOUT/CATO phase with no monitor latched (phase
+    word upset, watchdog reset) is still reported as bad, so the tile never
+    says 'none' while the board is locked out.
+    """
+    if latched == 0xFFFFFFFF:
+        return "LATCH CORRUPT", "bad", ["latch word corrupt"]
+    flight = phase in IN_FLIGHT
+    items = []
+    for i, n in enumerate(MONITORS):
+        a, l = (active >> i) & 1, (latched >> i) & 1
+        if not (a or l):
+            continue
+        sev = SEV[n][1 if flight else 0]
+        if l:
+            items.append((0 if a else 1, i, f"{n} LATCHED" if a else f"{n} latched"))
+        elif sev == "HARD":
+            items.append((0, i, f"{n} FAILING"))
+        elif sev == "SOFT":
+            items.append((2, i, f"{n} active"))
+        else:
+            items.append((3, i, f"{n} advisory"))
+    items.sort()
+    full = [t for _r, _i, t in items]
+    if not items:
+        if phase in ("LOCKOUT", "CATO"):
+            return f"{phase}: no monitor latched (reset or phase upset)", "bad", []
+        return "none", "ok", []
+    worst = items[0][0]
+    style = "bad" if worst <= 1 else ("warn" if worst == 2 else "info")
+    text = full[0] + (f"  +{len(full) - 1} more" if len(full) > 1 else "")
+    return text, style, full
 
 
 # ---------------------------------------------------------------------------

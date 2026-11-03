@@ -65,6 +65,7 @@ class SimDevice:
         self.ovr = 0
         self.frame = 0
         self.banner_sent = False
+        self.settle_t = 0.0
 
     def _emit(self, s: str | bytes) -> None:
         """Caller holds the lock."""
@@ -128,7 +129,8 @@ class SimDevice:
                     self.banner_sent = True
                     self._say(f"\r\n=== Hyades FC-V4 (F411 96 MHz) build {self.builds}, reset: {self.reset_cause} ===")
                     self._say(f"[BOOT] log {len(self.log)}/{LOG_CAP} B used. Type 'help' for commands.")
-                    self._say("[BOOT] GPS edges PA10(RX)=0 PA15=0, 0 B, 0 NMEA -> no signal: check module TX wire and GND")
+                    self._say("[BOOT] GPS probe: PA10 rx1 float 0e | PA15 tx1 float 0e | PA3 rx2 high 1843e ~9600 | PA2 tx2 float 0e")
+                    self._say("[BOOT] GPS port1 9600 Bd 0 B, port2 9600 Bd 0 B, 0 NMEA -> module transmitting")
                     self._event("boot")
                     self._go("CAL")
                     self._say("[BOOT] calibrating gyro - keep still")
@@ -136,7 +138,7 @@ class SimDevice:
                 if self.phase == "CAL" and t > self.boot_s * 0.4:
                     self._say("[BOOT] gyro bias dps +0.120 -0.034 +0.051 | seed RPY deg +0.4 -1.1 +0.0")
                     self._go("SETTLE")
-                if self.phase == "SETTLE" and t > self.boot_s:
+                if self.phase == "SETTLE" and t > self.boot_s and time.monotonic() - self.settle_t > 1.0:
                     self._go("READY")
                     self.mode = "FULL"
                 if self.imu_fail and self.phase not in ("LOCKOUT", "CATO"):
@@ -241,6 +243,17 @@ class SimDevice:
             if arg:
                 self.stream = arg != "off"
             self._say(f"stream {'on' if self.stream else 'off'}")
+        elif cmd == "faults" and arg == "clear":
+            if flying or self.phase == "CATO":
+                self._say("ERR not in flight")
+                return
+            self.imu_fail = False
+            self.active = self.latched = 0
+            if self.phase == "LOCKOUT":
+                self.phase = "SETTLE"
+                self.settle_t = time.monotonic()
+            self._event("faults cleared (operator)")
+            self._say("faults clear: OK")
         elif cmd == "faults":
             self._say(f"phase {self.phase}  ctrl {self.mode}  latch {self.latched:08X}")
             self._say("  monitor    act lat  trips  count  last_r")
@@ -251,6 +264,12 @@ class SimDevice:
             for n, us in (("imu", 310), ("est", 280), ("fdir", 12), ("ctrl", 90), ("log", 40), ("telem", 60)):
                 self._say(f"  {n:<9} {1:5d}  {us:7d}  {us + 40:7d}")
             self._say(f"  overruns {self.ovr}, usb tx dropped 0 B, rx dropped 0 B")
+        elif cmd == "gps" and arg == "raw":
+            self._say("  $GNGGA,120000.000,,,,,0,00,25.5,,,,,,*7A")
+            self._say("  $GNRMC,120000.000,V,,,,,,,031126,,,N,V*2C")
+        elif cmd == "gps" and arg == "probe":
+            self._say("GPS probe: PA10 rx1 float 0e | PA15 tx1 float 0e | PA3 rx2 high 1843e ~9600 | PA2 tx2 float 0e")
+            self._say("GPS port1 9600 Bd 0 B, port2 9600 Bd 0 B, 0 NMEA -> module transmitting")
         elif cmd == "gps":
             self._say("gps fix=0 sats=0 hdop=+99.9 alt=+0.0 m utc=000000  lat/lon(x1e4)=+0,+0")
             self._say("    bytes=0 nmea=0 gga=0 rmc=0 bad=0 overrun=0")

@@ -79,6 +79,21 @@ static void test_info_monitor_never_degrades(void)
     TEST_ASSERT_EQUAL(CAP_FULL, Fdir_Capability(&F));
 }
 
+static void test_operator_clear(void)
+{
+    for (uint16_t i = 0u; i < FDIR_IMU_READ_N; i++) { (void)Fdir_Eval(&F, MON_IMU_READ, 1.0f, false); }
+    TEST_ASSERT_EQUAL(SEV_HARD, Fdir_Worst(&F, false));
+    TEST_ASSERT_TRUE((Fdir_HardMask(false) & (1u << MON_IMU_READ)) != 0u);
+    TEST_ASSERT_TRUE((Fdir_HardMask(false) & (1u << MON_GPS_LINK)) == 0u);
+    Fdir_ClearLatch(&F);
+    uint32_t l = 1u;
+    TEST_ASSERT_TRUE(Fdir_LatchRead(&F, &l));
+    TEST_ASSERT_EQUAL_HEX32(0u, l);
+    TEST_ASSERT_EQUAL(SEV_INFO, Fdir_Worst(&F, false));
+    TEST_ASSERT_EQUAL_UINT16(1u, F.trips[MON_IMU_READ]);             /* history kept */
+    TEST_ASSERT_FALSE(Fdir_Eval(&F, MON_IMU_READ, 1.0f, false));     /* needs full persistence again */
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -90,5 +105,6 @@ int main(void)
     RUN_TEST(test_nan_residual_fails);
     RUN_TEST(test_corrupt_latch_is_hard_and_no_capability);
     RUN_TEST(test_info_monitor_never_degrades);
+    RUN_TEST(test_operator_clear);
     return UNITY_END();
 }
