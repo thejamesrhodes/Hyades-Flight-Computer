@@ -1,0 +1,5 @@
+Debug/
+Release/
+*.bak_*
+_backup*/
+build-host/
