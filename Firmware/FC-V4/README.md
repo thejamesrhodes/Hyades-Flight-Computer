@@ -120,7 +120,8 @@ because the roll gain is scheduled on it (Kp = c/q in the Matlab design).
   this; the G79W (8.3 g) does not.
 
 Detectors (`Core/hyades/mission/detect.c`, thresholds in `board.h` §10):
-liftoff (axial > 3 g for 50 ms, READY only), burnout (axial < 0), apogee
+liftoff (axial > 3 g for 100 ms and nav v_up > 8 m/s, or 300 ms if nav is
+saturated; READY only, and READY is held while it is confirming), burnout (axial < 0), apogee
 (v_up < 0, or a timer backup), landing (still + GPS-aided |v_up| small, or a
 timer backup). They request a phase; the protected phase table decides.
 The text status line now ends with `h= vz= q=`.
@@ -139,7 +140,14 @@ python Tools/fc_hitl.py static --frames 100000      # link soak on the pad
 python Tools/fc_hitl.py flight --motor G79W         # open loop
 python Tools/fc_hitl.py flight --motor G79W --closed --cl0 0.002
 python Tools/hitl_crosscheck.py                     # Python plant vs Matlab
+python Tools/fc_hitl_campaign.py                    # worst-case campaign (~45 min)
+python Tools/hitl_figures.py Tools/logs/hitl/campaign-<time>
 ```
+
+Roll control (`CTRL_ROLL_LAW 1`): the Matlab q-scheduled law,
+δ = −(c/q̂)·p + bounded trim, with q̂ from NAV-01 (fallback to the lowest gain
+when q̂ is invalid). Campaign results and failure modes:
+`Documentation/HITL-02-worst-case-campaign-results.md`.
 
 Once the first host sample arrives the board runs in lockstep (one sample per
 10 ms frame, one reply back), takes the GPS NMEA from the host, and accepts

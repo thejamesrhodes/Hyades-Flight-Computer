@@ -86,8 +86,8 @@ The real flight firmware runs on the real MCU, and a simulation on the PC replac
 | H0 | Interface + seam | Done |
 | H0b | Python plant | Done. To do: a `sim()`-level Simulink check, once the model logs its outputs |
 | H1 | Open-loop estimator | Done for G79W; dispersions (wind, scale factor, seeds) to be scripted |
-| H2 | Phase detectors | Persistence form done. To do: SPRT, a dispersed set, and a 30 min pad hold with handling |
-| H3 | Closed-loop roll | **Next.** Schedule the INDI roll effectiveness on q̂: G_roll(q̂) = k_b·q̂·`FIN_DEFLECT` with k_b = A·d·C_lδ/I_xx from P, or switch the roll channel to the MATLAB `Kp = c/q̂` damper. Clamp at `NAV_Q_SPEED_MIN`. Then run the 50-run CDS-01 Monte Carlo through HITL |
+| H2 | Phase detectors | Persistence form done; liftoff rule hardened after the HITL-02 pad-knock cases. To do: SPRT, a dispersed set, and a 30 min pad hold with handling |
+| H3 | Closed-loop roll | **Started (HITL-02):** `CTRL_ROLL_LAW 1` = the MATLAB q-scheduled law; stable across single dispersions; limit cycle when errors stack. Next: re-run the schedule design with the 100 Hz ZOH and q̂ error. Original plan: Schedule the INDI roll effectiveness on q̂: G_roll(q̂) = k_b·q̂·`FIN_DEFLECT` with k_b = A·d·C_lδ/I_xx from P, or switch the roll channel to the MATLAB `Kp = c/q̂` damper. Clamp at `NAV_Q_SPEED_MIN`. Then run the 50-run CDS-01 Monte Carlo through HITL |
 | H4 | FDIR campaign | Use the SAMPLE flags for injections: per-frame read failure is already supported; NaN and saturation come from the host |
 | H5 | Timing/latency | Real-time mode, not built yet. The lockstep loop currently suppresses overrun counting |
 

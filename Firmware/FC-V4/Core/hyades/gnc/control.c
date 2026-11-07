@@ -12,6 +12,7 @@
 #include "control.h"
 #include "board.h"
 #include "so3_math.h"
+#include <math.h>
 
 /* Effectiveness pseudoinverse constants (closed form). G maps fin[-1,+1] ->
  * body angular accel [pitch(X), yaw(Y), roll(Z)]; for the cruciform G G^T is
@@ -66,6 +67,7 @@ static float clampf(float x, float lim)
 void Ctrl_Init(Controller *c)
 {
     c->mode = CTRL_MODE_OFF;
+    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f;
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; c->omega_prev[i]=0.0f; }
     for (int i=0;i<4;i++) { c->delta_f[i]=0.0f; c->fin_last[i]=0.0f; }
     for (int i=0;i<3;i++) { c->bq_wdot[i].z1=0.0f; c->bq_wdot[i].z2=0.0f; }
@@ -77,6 +79,7 @@ void Ctrl_SetMode(Controller *c, CtrlMode mode)
 {
     if (mode == c->mode) { return; }
     c->mode = mode;
+    if (mode == CTRL_MODE_OFF) { c->trim = 0.0f; }   /* trim kept across FULL<->RDAMP */
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; biquad_preload(c, &c->bq_wdot[i], 0.0f); }
     for (int i=0;i<4;i++) {
         c->delta_f[i] = c->fin_last[i];
@@ -84,8 +87,38 @@ void Ctrl_SetMode(Controller *c, CtrlMode mode)
     }
 }
 
-/* Gyro-only rate damper: fin = -K * rate, per channel, clipped. */
-static void rate_damp(const float w[3], float fin_out[4])
+#define FIN_DEFLECT_RAD (FIN_DEFLECT_DEG * 0.017453292519943295f)
+
+void Ctrl_SetQbar(Controller *c, float qbar_pa, bool valid)
+{
+    c->q_valid = valid && isfinite(qbar_pa);
+    c->qbar = c->q_valid ? qbar_pa : CTRL_ROLL_Q_FALLBACK;
+}
+
+/* Port of controller.m (Mode 1) + roll_trim, at the frame rate. */
+float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
+{
+    float q_e = c->q_valid ? c->qbar : CTRL_ROLL_Q_FALLBACK;
+    if (q_e < CTRL_ROLL_Q_MIN) { q_e = CTRL_ROLL_Q_MIN; }
+    const float Kp = CTRL_ROLL_C / q_e;                 /* rad per rad/s       */
+    const float d_damp = -Kp * p;                       /* p_e = ref - p, ref 0 */
+    if (trim_on) {
+        const float e = -p;
+        const float e_band = CTRL_TRIM_BAND_K * CTRL_TRIM_DEADBAND_RAD / Kp;
+        const float drive = (fabsf(e) > e_band) ? (e - copysignf(e_band, e)) : 0.0f;
+        const bool sat = fabsf(d_damp + c->trim) >= (CTRL_ROLL_TRAVEL_RAD * 0.999f);
+        if (!sat) {
+            const float step = clampf(CTRL_TRIM_KI * drive, CTRL_TRIM_RATE);
+            c->trim = clampf(c->trim + (step * dt), CTRL_TRIM_CLAMP);
+        }
+    }
+    return clampf(d_damp + c->trim, CTRL_ROLL_TRAVEL_RAD);
+}
+
+/* Gyro-only rate damper: fin = -K * rate, per channel, clipped. With the
+ * scheduled roll law, roll uses it without trim (q is the fallback value
+ * whenever the estimator, and so q_hat, is not trusted). */
+static void rate_damp(Controller *c, const float w[3], float dt, float fin_out[4])
 {
 #if CTRL_ENABLE_PITCHYAW
     const float p = -CTRL_RD_GAIN_PITCHYAW * w[0];
@@ -93,7 +126,12 @@ static void rate_damp(const float w[3], float fin_out[4])
 #else
     const float p = 0.0f, y = 0.0f;
 #endif
+#if CTRL_ROLL_LAW == 1
+    const float r = Ctrl_RollLaw(c, w[2], dt, false) / FIN_DEFLECT_RAD;
+#else
+    (void)c; (void)dt;
     const float r = -CTRL_RD_GAIN_ROLL * w[2];
+#endif
     fin_out[0] = clampf( p + r, CTRL_FIN_LIMIT);   /* top    */
     fin_out[1] = clampf( y + r, CTRL_FIN_LIMIT);   /* right  */
     fin_out[2] = clampf(-p + r, CTRL_FIN_LIMIT);   /* bottom */
@@ -104,7 +142,7 @@ void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
                  const float gyro[3], float dt, float fin_out[4])
 {
     if (c->mode != CTRL_MODE_FULL) {
-        if (c->mode == CTRL_MODE_RATE_DAMP) { rate_damp(gyro, fin_out); }
+        if (c->mode == CTRL_MODE_RATE_DAMP) { rate_damp(c, gyro, dt, fin_out); }
         else { fin_out[0]=fin_out[1]=fin_out[2]=fin_out[3]=0.0f; }
         /* Keep the rate-difference reference current for a bumpless FULL entry. */
         c->omega_prev[0]=omega[0]; c->omega_prev[1]=omega[1]; c->omega_prev[2]=omega[2];
@@ -161,7 +199,15 @@ void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
     float inc_p = 0.0f; (void)da[0];
     float inc_y = 0.0f; (void)da[1];
 #endif
+#if CTRL_ROLL_LAW == 1
+    /* Roll by the q-scheduled law (absolute command, not an INDI increment):
+     * express it as the increment that lands delta_f on it. */
+    const float roll_abs = Ctrl_RollLaw(c, omega[2], dt, true) / FIN_DEFLECT_RAD;
+    (void)da[2];
+    float inc_r = 0.0f;
+#else
     float inc_r = da[2]*INV_ROLL;    /* roll  (Z), common to all fins */
+#endif
 
     float dinc[4];
     dinc[0] =  inc_p + inc_r;   /* top    */
@@ -172,7 +218,13 @@ void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
     /* delta_cmd = delta_f + increment, saturated per fin (INDI anti-windup:
      * the SATURATED command is fed back into the actuator filter below). */
     for (int i=0;i<4;i++) {
+#if CTRL_ROLL_LAW == 1
+        /* pitch/yaw INDI increments act about the roll common mode */
+        const float base = (CTRL_ENABLE_PITCHYAW != 0) ? (c->delta_f[i] - (0.25f*(c->delta_f[0]+c->delta_f[1]+c->delta_f[2]+c->delta_f[3]))) : 0.0f;
+        fin_out[i] = clampf(base + dinc[i] + roll_abs, CTRL_FIN_LIMIT);
+#else
         fin_out[i] = clampf(c->delta_f[i] + dinc[i], CTRL_FIN_LIMIT);
+#endif
         c->fin_last[i] = fin_out[i];
     }
 

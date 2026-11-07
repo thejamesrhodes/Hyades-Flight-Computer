@@ -21,6 +21,8 @@ static bool persist(Detect *d, bool cond, uint16_t n)
     return d->n >= n;
 }
 
+bool Detect_LiftoffPending(const Detect *d) { return (d->last == PH_READY) && (d->n > 0u); }
+
 Phase Detect_Step(Detect *d, Phase now, const DetectIn *in, float dt)
 {
     if (now != d->last) { d->last = now; d->n = 0u; d->t_ms = 0u; }
@@ -34,7 +36,10 @@ Phase Detect_Step(Detect *d, Phase now, const DetectIn *in, float dt)
 
     switch (now) {
     case PH_READY:
-        if (persist(d, in->f_axial > c->liftoff_acc, c->liftoff_n)) { to = PH_BOOST; }
+        if (persist(d, in->f_axial > c->liftoff_acc, c->liftoff_n_nov)
+            || ((d->n >= c->liftoff_n) && in->v_valid && (in->v_up > c->liftoff_v))) {
+            to = PH_BOOST;
+        }
         break;
     case PH_BOOST:
         if ((d->t >= c->t_boost_min) && persist(d, in->f_axial < c->burnout_acc, c->burnout_n)) {

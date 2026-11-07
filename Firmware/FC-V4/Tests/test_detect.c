@@ -7,7 +7,7 @@ static Detect D;
 
 static DetectCfg cfg(void)
 {
-    DetectCfg c = { .liftoff_acc = 3.0f * G, .liftoff_n = 5u, .t_boost_min = 0.1f,
+    DetectCfg c = { .liftoff_acc = 3.0f * G, .liftoff_n = 10u, .liftoff_v = 8.0f, .liftoff_n_nov = 30u, .t_boost_min = 0.1f,
                     .burnout_acc = 0.0f, .burnout_n = 5u, .apogee_n = 5u, .t_apogee_max = 15.0f,
                     .t_land_min = 5.0f, .t_land_max = 300.0f, .land_acc_tol = 1.0f,
                     .land_gyro = 0.2f, .land_v = 1.5f, .land_n = 200u };
@@ -28,11 +28,23 @@ static Phase run(Phase ph, DetectIn in, uint32_t n)
 
 static void test_liftoff_needs_persistence(void)
 {
-    DetectIn bump = { .f_axial = 5.0f * G, .f_norm = 5.0f * G };
-    TEST_ASSERT_EQUAL_HEX16(PH_READY, run(PH_READY, bump, 4u));   /* 40 ms knock */
+    DetectIn knock = { .f_axial = 6.0f * G, .f_norm = 6.0f * G, .v_up = 2.0f, .v_valid = true };
+    TEST_ASSERT_EQUAL_HEX16(PH_READY, run(PH_READY, knock, 25u));   /* long knock, little velocity */
     DetectIn rest = { .f_axial = G, .f_norm = G };
     TEST_ASSERT_EQUAL_HEX16(PH_READY, run(PH_READY, rest, 1u));
-    TEST_ASSERT_EQUAL_HEX16(PH_BOOST, run(PH_READY, bump, 5u));
+    DetectIn motor = { .f_axial = 8.0f * G, .f_norm = 8.0f * G, .v_up = 9.0f, .v_valid = true };
+    TEST_ASSERT_EQUAL_HEX16(PH_READY, run(PH_READY, motor, 9u));
+    TEST_ASSERT_EQUAL_HEX16(PH_BOOST, run(PH_READY, motor, 1u));    /* 100 ms + 8 m/s */
+}
+
+/* Nav invalid (saturated): acceleration alone, but for 300 ms. */
+static void test_liftoff_without_nav(void)
+{
+    DetectIn sat = { .f_axial = 15.0f * G, .f_norm = 15.0f * G, .v_valid = false };
+    TEST_ASSERT_FALSE(Detect_LiftoffPending(&D));
+    TEST_ASSERT_EQUAL_HEX16(PH_READY, run(PH_READY, sat, 29u));
+    TEST_ASSERT_TRUE(Detect_LiftoffPending(&D));          /* arbiter must hold READY */
+    TEST_ASSERT_EQUAL_HEX16(PH_BOOST, run(PH_READY, sat, 1u));
 }
 
 static void test_no_liftoff_outside_ready(void)
@@ -79,6 +91,7 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_liftoff_needs_persistence);
+    RUN_TEST(test_liftoff_without_nav);
     RUN_TEST(test_no_liftoff_outside_ready);
     RUN_TEST(test_burnout_after_min_time);
     RUN_TEST(test_apogee_on_velocity_or_timer);
