@@ -12,7 +12,7 @@ CFLAGS  := -std=c11 -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
            -Iunity -I$(CORE)/math -I$(CORE)/gnc -I$(CORE)/mission -I$(CORE)/svc -I../Core/Inc
 OUT     := ../build-host
 
-TESTS := test_crc test_nmea test_logrec test_phase test_fdir test_control test_iekf
+TESTS := test_crc test_nmea test_logrec test_phase test_fdir test_control test_iekf test_nav test_detect
 
 SRC_test_crc     := $(CORE)/svc/crc.c
 SRC_test_nmea    := $(CORE)/svc/nmea.c
@@ -21,6 +21,8 @@ SRC_test_phase   := $(CORE)/mission/phase.c
 SRC_test_fdir    := $(CORE)/mission/fdir.c
 SRC_test_control := $(CORE)/gnc/control.c
 SRC_test_iekf    := $(CORE)/gnc/iekf.c
+SRC_test_nav     := $(CORE)/gnc/nav.c
+SRC_test_detect  := $(CORE)/mission/detect.c $(CORE)/mission/phase.c
 
 all: $(addprefix $(OUT)/,$(TESTS))
 	@fail=0; for t in $(TESTS); do $(OUT)/$$t || fail=1; done; exit $$fail

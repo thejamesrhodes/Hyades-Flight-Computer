@@ -21,14 +21,19 @@
 #endif
 #include "console.h"
 #include "control.h"
+#include "detect.h"
 #include "fdir.h"
 #include "flashlog.h"
 #include "fwupdate.h"
 #include "gps.h"
+#if CFG_HITL
+#include "hitl.h"
+#endif
 #include "iekf.h"
 #include "imu.h"
 #include "leds.h"
 #include "logrec.h"
+#include "nav.h"
 #include "phase.h"
 #include "pwm.h"
 #include "sched.h"
@@ -82,7 +87,29 @@ static struct {
     const char *reset_cause;
     uint32_t   reboot_at_ms;
     uint32_t   last_active;      /* FDIR active bits last frame (for events) */
+    Nav        nav;              /* NAV-01: h, v, q_hat                      */
+    Detect     det;              /* flight-event detectors                  */
+    uint32_t   gps_gga_seen;     /* GGA count last fed to nav               */
+#if CFG_HITL
+    uint32_t   hitl_idx;         /* last host sample index                  */
+    bool       hitl_missing;     /* no host sample this frame               */
+    bool       hitl_seeded;      /* estimator re-seeded from host data      */
+#endif
 } A;
+
+static const NavCfg k_nav_cfg = {
+    .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .still_acc_mps2 = NAV_STILL_ACC_MPS2,
+    .still_gyro_radps = NAV_STILL_GYRO_RADPS, .acc_psd = NAV_ACC_PSD, .gps_var_m2 = NAV_GPS_VAR_M2,
+    .gps_nis_max = NAV_GPS_NIS_MAX, .gps_rej_reset = NAV_GPS_REJ_RESET, .gps_v_var = NAV_GPS_V_VAR,
+    .q_speed_min = NAV_Q_SPEED_MIN,
+};
+static const DetectCfg k_det_cfg = {
+    .liftoff_acc = DET_LIFTOFF_ACC, .liftoff_n = DET_LIFTOFF_N, .t_boost_min = DET_T_BOOST_MIN_S,
+    .burnout_acc = DET_BURNOUT_ACC, .burnout_n = DET_BURNOUT_N, .apogee_n = DET_APOGEE_N,
+    .t_apogee_max = DET_T_APOGEE_MAX_S, .t_land_min = DET_T_LAND_MIN_S, .t_land_max = DET_T_LAND_MAX_S,
+    .land_acc_tol = DET_LAND_ACC_TOL, .land_gyro = DET_LAND_GYRO_RADPS, .land_v = DET_LAND_V_MPS,
+    .land_n = DET_LAND_N,
+};
 
 /* ---------------------------------------------------------------------------
  * Helpers
@@ -150,9 +177,40 @@ static uint16_t fault_bits(void)
 /* ---------------------------------------------------------------------------
  * Tasks
  * ------------------------------------------------------------------------- */
+#if CFG_HITL
+/* Host sample in place of the IMU read (lockstep). The first sample re-seeds
+ * the attitude and nav, which were seeded from the real board at boot. */
+static void hitl_sense(void)
+{
+    HitlSample s;
+    A.hitl_missing = !Hitl_Take(&s);
+    A.imu.ok = false;
+    if (!A.hitl_missing) {
+        A.hitl_idx = s.idx;
+        bool fin = true;
+        for (uint32_t k = 0u; k < 3u; k++) {
+            A.imu.accel[k] = s.accel[k]; A.imu.gyro[k] = s.gyro[k];
+            fin = fin && isfinite(s.accel[k]) && isfinite(s.gyro[k]);
+        }
+        A.imu.ok = fin && ((s.flags & HITL_SF_FAIL) == 0u);
+        if (A.imu.ok && !A.hitl_seeded) {
+            const float m0[3] = { 0.0f, 0.0f, 0.0f };
+            IEKF_Seed(&A.iekf, A.imu.accel, m0);
+            Nav_Init(&A.nav, &k_nav_cfg);
+            A.hitl_seeded = true;
+            event(EV_MAINT, s.idx, "HITL live: IMU+GPS from host");
+        }
+    }
+}
+#endif
+
 static void task_sense(void)
 {
+#if CFG_HITL
+    if (Hitl_Live()) { hitl_sense(); } else { IMU_ReadBody(&A.gcal, &A.imu); }
+#else
     IMU_ReadBody(&A.gcal, &A.imu);
+#endif
 #if CFG_FAULT_INJECTION
     if (A.inject_imu) { A.imu.ok = false; }
 #endif
@@ -164,12 +222,37 @@ static void task_sense(void)
     A.ckpt |= CK_SENSE;
 }
 
+/* GPS -> nav: site elevation on the pad, altitude aiding after apogee only. */
+static void nav_gps(Phase ph)
+{
+#if CFG_ENABLE_GPS
+    const GpsData *g = GPS_Get();
+    if (g->gga == A.gps_gga_seen) { return; }
+    A.gps_gga_seen = g->gga;
+    const bool good = (g->fix_quality > 0u) && (g->sats >= NAV_GPS_SATS_MIN) && (g->hdop <= NAV_GPS_HDOP_MAX);
+    if (!good) { return; }
+    if ((ph == PH_SETTLING) || (ph == PH_READY)) {
+        Nav_PadGps(&A.nav, g->alt_msl_m);
+    } else if ((ph == PH_DESCENT) || (ph == PH_LANDED)) {
+        (void)Nav_GpsAlt(&A.nav, g->alt_msl_m);
+    } else {
+        /* boost/coast: not used (lock loss, 1 Hz) */
+    }
+#else
+    (void)ph;
+#endif
+}
+
 static void task_estimate(void)
 {
     A.acc_applied = false;
     if (A.imu.ok) {
         IEKF_Predict(&A.iekf, A.imu.gyro, A.dt);
         A.acc_applied = IEKF_UpdateAccel(&A.iekf, A.imu.accel);
+        const Phase ph = phase_now();
+        const bool pad = !Phase_InFlight(ph) && (ph != PH_CATO_SAFE);
+        Nav_Step(&A.nav, A.iekf.q, A.imu.accel, A.iekf.omega, A.dt, pad);
+        nav_gps(ph);
     }
     A.ckpt |= CK_EST;
 }
@@ -216,8 +299,33 @@ static void task_fdir(void)
         ph = phase_now();
     }
 
+    /* --- flight-event detectors (requests; the phase table decides) ---
+     * Before the pad demotion below: a fast motor can clip the accelerometer
+     * at liftoff and trip accel_rng (SOFT) in the same frames that confirm
+     * liftoff; demoting READY -> SETTLING then would leave the vehicle in
+     * flight with control disabled. A HARD fault still blocks every request
+     * except landing: DESCENT has no CATO edge, and control is already off,
+     * so a sensor lost under the parachute must not leave the board in a
+     * flight phase (which refuses log pull / reboot) forever. */
+#if CFG_PHASE_DETECT
+    if ((Fdir_Worst(&A.fdir, fl) != SEV_HARD) || (ph == PH_DESCENT)) {
+        DetectIn in;
+        memset(&in, 0, sizeof in);
+        if (A.imu.ok) {
+            in.f_axial = A.imu.accel[2];                  /* body +Z = nose */
+            in.f_norm = an;
+            in.w_norm = wn * D2R;
+        }
+        in.v_up = Nav_VUp(&A.nav);
+        in.v_valid = Nav_QValid(&A.nav);
+        in.v_gps = (A.nav.flags & NAV_F_GPS_AIDED) != 0u;
+        const Phase to = Detect_Step(&A.det, ph, &in, A.dt);
+        if (to != ph) { go_phase(to); ph = phase_now(); }
+    }
+#endif
+
     /* --- arbiter: phase --- */
-    const FdirSev worst = Fdir_Worst(&A.fdir, fl);
+    const FdirSev worst = Fdir_Worst(&A.fdir, Phase_InFlight(ph));
     if (worst == SEV_HARD) {
         go_phase(fl ? PH_CATO_SAFE : PH_LOCKOUT);
     } else if (ph == PH_SETTLING) {
@@ -319,9 +427,9 @@ static void send_text(void)
 #endif
     uint32_t l = 0xFFFFFFFFu;
     (void)Fdir_LatchRead(&A.fdir, &l);
-    char b[12][CON_FX_LEN];
+    char b[15][CON_FX_LEN];
     Con_Printf("t=%lu.%02lu %s %s f=%02lX/%02lX RPY %s %s %s w %s %s %s |a|=%s fin %s %s %s %s "
-               "imu=%s(%lu) loop=%lu ovr=%lu gps=%s s%u alt=%s rx=%lu nmea=%lu log=%lu%%\r\n",
+               "imu=%s(%lu) loop=%lu ovr=%lu gps=%s s%u alt=%s rx=%lu nmea=%lu log=%lu%% h=%s vz=%s q=%s\r\n",
                (unsigned long)(A.t0 / 1000000u), (unsigned long)((A.t0 / 10000u) % 100u),
                Phase_Name(phase_now()), mode_name(A.ctrl.mode),
                (unsigned long)A.fdir.active, (unsigned long)l,
@@ -334,7 +442,9 @@ static void send_text(void)
                (unsigned long)A.loop_us, (unsigned long)A.overruns,
                gst, (unsigned)g->sats, Con_Fx(b[11], g->alt_msl_m, 1u),
                (unsigned long)g->bytes, (unsigned long)g->sentences,
-               (unsigned long)((FlashLog_UsedBytes() * 100u) / FlashLog_CapacityBytes()));
+               (unsigned long)((FlashLog_UsedBytes() * 100u) / FlashLog_CapacityBytes()),
+               Con_Fx(b[12], Nav_Height(&A.nav), 1u), Con_Fx(b[13], Nav_VUp(&A.nav), 1u),
+               Con_Fx(b[14], A.nav.qbar, 0u));
 }
 #endif
 
@@ -351,7 +461,11 @@ static void task_telem(void)
 
 static void task_comms(void)
 {
+#if CFG_HITL
+    Hitl_Poll();                                  /* frames to the seam, text to the console */
+#else
     Con_Poll();
+#endif
     Fw_Task();
     FlashLog_PullTask();
     UsbIo_Task();
@@ -621,7 +735,11 @@ static void cmd_fw(uint32_t argc, char *argv[])
 static void cmd_reboot(uint32_t argc, char *argv[])
 {
     (void)argc; (void)argv;
-    if (Phase_InFlight(phase_now())) { Con_Printf("ERR not in flight\r\n"); return; }
+    bool sim = false;                             /* HITL: the "flight" is simulated */
+#if CFG_HITL
+    sim = Hitl_Live();
+#endif
+    if (Phase_InFlight(phase_now()) && !sim) { Con_Printf("ERR not in flight\r\n"); return; }
     FlashLog_Stop();
     PWM_CentreFins();
     Con_Printf("rebooting\r\n");
@@ -754,6 +872,8 @@ static void boot(UART_HandleTypeDef *huart)
     Fdir_Init(&A.fdir);
     Ctrl_Init(&A.ctrl);
     IEKF_Init(&A.iekf);
+    Nav_Init(&A.nav, &k_nav_cfg);
+    Detect_Init(&A.det, &k_det_cfg);
     FlashLog_Init();
     A.stream = true;
     Leds_Update(PH_BOOT, false, GPS_LED_NONE, 0u);
@@ -814,6 +934,37 @@ static void boot(UART_HandleTypeDef *huart)
     go_phase(PH_SETTLING);
 }
 
+#if CFG_HITL
+/* Wait for the host's next sample, servicing USB meanwhile. Bounded by
+ * HITL_WAIT_US (and an iteration cap): a missing sample becomes a failed IMU
+ * read in task_sense, never a hang or a starved watchdog. */
+static void hitl_wait(void)
+{
+    const uint32_t t0 = Sched_MicrosNow();
+    for (uint32_t i = 0u; (i < 1000000u) && !Hitl_Pending(); i++) {
+        UsbIo_Task();
+        Hitl_Poll();
+        if ((Sched_MicrosNow() - t0) >= HITL_WAIT_US) { break; }
+    }
+}
+
+static void hitl_reply(void)
+{
+    HitlReply r;
+    memset(&r, 0, sizeof r);
+    r.idx = A.hitl_idx;
+    r.phase = Phase_Index(phase_now());
+    r.mode = (uint8_t)A.ctrl.mode;
+    r.faults = fault_bits();
+    r.loop_us = (A.loop_us > 0xFFFFu) ? 0xFFFFu : (uint16_t)A.loop_us;
+    r.nav_flags = (uint8_t)(A.nav.flags & 0xFFu);
+    r.hitl_flags = A.hitl_missing ? HITL_RF_MISSING : 0u;
+    for (uint32_t k = 0u; k < 4u; k++) { r.fin[k] = A.fin[k]; r.q[k] = A.iekf.q[k]; }
+    r.h = Nav_Height(&A.nav); r.v_up = Nav_VUp(&A.nav); r.speed = A.nav.speed; r.qbar = A.nav.qbar;
+    (void)Hitl_Reply(&r);
+}
+#endif
+
 void App_Run(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
 {
     memset(&A, 0, sizeof A);
@@ -834,17 +985,30 @@ void App_Run(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
     A.deadline = Sched_MicrosNow() + FRAME_PERIOD_US;
     A.prev_t   = Sched_MicrosNow();
     for (;;) {
-        /* Late at the top of the frame = the previous frame overran (detect,
-         * never mask: the deadline advances by exactly one period). */
-        A.overran = ((int32_t)(Sched_MicrosNow() - A.deadline) > 0);
-        if (A.overran && !A.skip_overrun) { A.overruns++; }
-        Sched_WaitUntil(A.deadline);
-        A.deadline += FRAME_PERIOD_US;
+#if CFG_HITL
+        const bool lockstep = Hitl_Live();
+#else
+        const bool lockstep = false;
+#endif
+        if (lockstep) {
+#if CFG_HITL
+            hitl_wait();                          /* host-paced, bounded */
+#endif
+            A.overran = false;                    /* timing is H5 (real-time mode) */
+            A.deadline = Sched_MicrosNow() + FRAME_PERIOD_US;
+        } else {
+            /* Late at the top of the frame = the previous frame overran (detect,
+             * never mask: the deadline advances by exactly one period). */
+            A.overran = ((int32_t)(Sched_MicrosNow() - A.deadline) > 0);
+            if (A.overran && !A.skip_overrun) { A.overruns++; }
+            Sched_WaitUntil(A.deadline);
+            A.deadline += FRAME_PERIOD_US;
+        }
 
         A.t0 = Sched_MicrosNow();
         A.dt = (float)(A.t0 - A.prev_t) * 1e-6f;
         A.prev_t = A.t0;
-        if ((A.dt <= 0.0f) || (A.dt > 0.1f)) { A.dt = FRAME_DT_S; }
+        if (lockstep || (A.dt <= 0.0f) || (A.dt > 0.1f)) { A.dt = FRAME_DT_S; }   /* sim time */
 
         A.ckpt = 0u;
         for (uint32_t i = 0u; i < N_TASKS; i++) {
@@ -856,6 +1020,9 @@ void App_Run(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
             if (t->last_us > t->wcet_us) { t->wcet_us = t->last_us; }
         }
         A.loop_us = Sched_MicrosNow() - A.t0;
+#if CFG_HITL
+        if (lockstep) { hitl_reply(); }
+#endif
 
         if (A.ckpt == CK_ALL) { Wdg_Kick(); }        /* std D3: completed frame only */
         maintenance();

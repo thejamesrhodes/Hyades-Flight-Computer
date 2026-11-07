@@ -43,6 +43,11 @@ uint32_t       GPS_Overruns(void);
 bool           GPS_Alive(uint32_t timeout_ms);
 bool           GPS_HasFix(uint32_t timeout_ms);
 
+/* HITL (CFG_HITL): once external, USART2 bytes are drained and discarded and
+ * the parser is fed only through GPS_Inject (main-loop context). */
+void           GPS_SetExternal(bool on);
+void           GPS_Inject(const uint8_t *buf, uint32_t n);
+
 /* Last few raw NMEA lines (oldest first), for 'gps raw'. */
 #define GPS_RAW_LINES 4u
 uint32_t       GPS_RawLines(const char *out[GPS_RAW_LINES]);

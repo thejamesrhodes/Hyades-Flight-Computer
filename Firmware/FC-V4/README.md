@@ -8,11 +8,11 @@ under `Core/Src` is the F411 platform layer.
 
 | Layer | Where | What |
 |---|---|---|
-| L4 mission | `Core/hyades/mission` | `phase` flight-phase FSM (protected encoding, one-way), `fdir` table-driven monitor engine |
-| L3 GNC | `Core/hyades/gnc` | `iekf` attitude + gyro-bias invariant EKF, `control` SO(3) + INDI with OFF / RATE_DAMP / FULL ladder |
+| L4 mission | `Core/hyades/mission` | `phase` flight-phase FSM (protected encoding, one-way), `fdir` table-driven monitor engine, `detect` liftoff / burnout / apogee / landing detectors |
+| L3 GNC | `Core/hyades/gnc` | `iekf` attitude + gyro-bias invariant EKF, `nav` strapdown height / velocity / dynamic pressure (no baro), `control` SO(3) + INDI with OFF / RATE_DAMP / FULL ladder |
 | L2 services | `Core/hyades/svc` | `nmea` GPS parser, `logrec` 48-byte log records, `crc` |
-| L1 platform | `Core/Src` | `app` boot + 100 Hz task table + fault arbiter, `sched` (TIM5), `wdg` (IWDG), `usbio`, `console`, `flashlog`, `fwupdate`, `telemetry`, `leds` |
-| L0 drivers | `Core/Src` | `qmi8658` + `imu`, `pwm` (fins), `gps` (USART1 ring) |
+| L1 platform | `Core/Src` | `app` boot + 100 Hz task table + fault arbiter, `sched` (TIM5), `wdg` (IWDG), `usbio`, `console`, `flashlog`, `fwupdate`, `telemetry`, `leds`, `hitl` (PC-sim-in-the-loop seam, `CFG_HITL`) |
+| L0 drivers | `Core/Src` | `qmi8658` + `imu`, `pwm` (fins), `gps` (USART2 ring) |
 
 `Core/hyades` has no HAL dependency. `main.c` is CubeMX-generated and only
 calls `App_Run()`. All tunables are in `Core/Inc/board.h`.
@@ -99,6 +99,53 @@ tempco, and the `IEKF_Q_ANGLE` / `IEKF_Q_BIAS` values for board.h plus the
 sensor-noise floor of `IEKF_R_ACCEL` (R itself must stay larger: it also has
 to cover non-gravitational acceleration from handling and vibration).
 
+## Navigation and flight-event detection (NAV-01)
+
+There is no barometer, so height and speed come from integrating the
+accelerometer through the attitude estimate (`Core/hyades/gnc/nav.c`). What
+the roll controller needs from this is dynamic pressure, q = ½ρ(h)|v|²,
+because the roll gain is scheduled on it (Kp = c/q in the Matlab design).
+
+- Pad: the state is held at zero while the vehicle is still, and the gravity
+  magnitude is measured there (cancels the accelerometer's vertical bias at
+  1 g). Liftoff is integrated from its first sample, not from the end of the
+  detector window.
+- Site elevation: `NAV_SITE_ELEV_M` (MRC, near Twycross; an estimate, not
+  verified), replaced on the pad by the GPS altitude average when there is a
+  fix. Density changes only about 1 % per 100 m.
+- GPS altitude is fused only after apogee (2-state Kalman update, NIS gate).
+- Any accelerometer axis at full scale (±16 g) marks the velocity, height and
+  q as invalid (`NAV_F_SAT`) until the next pad reset. **Motor limit: peak
+  boost acceleration at most 14 g.** The OpenRocket I205W case (30 g) breaks
+  this; the G79W (8.3 g) does not.
+
+Detectors (`Core/hyades/mission/detect.c`, thresholds in `board.h` §10):
+liftoff (axial > 3 g for 50 ms, READY only), burnout (axial < 0), apogee
+(v_up < 0, or a timer backup), landing (still + GPS-aided |v_up| small, or a
+timer backup). They request a phase; the protected phase table decides.
+The text status line now ends with `h= vz= q=`.
+
+## Hardware-in-the-loop (HITL-01)
+
+`Tools/fc_hitl.py` runs the real firmware on the real board against a PC
+simulation of the flight (`Tools/hitl_model.py`): OpenRocket trajectory inputs
+(`Simulation/or_sim*.csv`, exported from the 62 mm model), the Matlab roll
+plant and canard actuator (`sim_params.json` from `export_sim_params.m`), and
+IMU/GPS models using the measured noise. The board must run a `CFG_HITL=1`
+build; close fc_console first.
+
+```
+python Tools/fc_hitl.py static --frames 100000      # link soak on the pad
+python Tools/fc_hitl.py flight --motor G79W         # open loop
+python Tools/fc_hitl.py flight --motor G79W --closed --cl0 0.002
+python Tools/hitl_crosscheck.py                     # Python plant vs Matlab
+```
+
+Once the first host sample arrives the board runs in lockstep (one sample per
+10 ms frame, one reply back), takes the GPS NMEA from the host, and accepts
+`reboot` even in a flight phase. Results: `Tools/logs/hitl/` (`.csv` per frame,
+`.json` summary). See `Documentation/HITL-01-pc-sim-in-the-loop-plan.md`.
+
 ## Faults
 
 HARD monitors latch and force LOCKOUT on the pad (CATO in flight); SOFT ones
@@ -139,6 +186,7 @@ fit) and `fc_noise.py --selftest` needs numpy.
 - Sustained overruns latch LOCKOUT on the pad but do not force a reset (B2).
 - USB OTG interrupt at NVIC priority 0 (ST default).
 - No magnetometer: heading is unobservable; FDIR monitors tilt variance only.
-- Liftoff / burnout / apogee detectors are not implemented: the flight phases
-  exist and are unit-tested, nothing requests them yet.
-- `CFG_BENCH_ACTUATE_READY` and `CFG_FAULT_INJECTION` must be 0 for flight.
+- Flight-event detectors are persistence counters, a simplification of the
+  FDS-01 §5.3 SPRT (upgrade planned with HITL H2).
+- `CFG_BENCH_ACTUATE_READY`, `CFG_FAULT_INJECTION` and `CFG_HITL` must be 0 for
+  flight; building with `-DCFG_FLIGHT_BUILD=1` turns that into a compile error.

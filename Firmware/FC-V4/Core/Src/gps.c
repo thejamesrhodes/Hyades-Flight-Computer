@@ -148,14 +148,28 @@ static void raw_push(char c)
     if ((c >= ' ') && (c < 0x7F) && (s_cur_len < (NMEA_LINE_MAX - 1u))) { s_cur[s_cur_len++] = c; }
 }
 
+static bool s_external;             /* HITL: host NMEA replaces USART2 */
+
 void GPS_Poll(uint32_t max_bytes)
 {
     const uint32_t now = HAL_GetTick();
     for (uint32_t i = 0u; (i < max_bytes) && (s_tail != s_head); i++) {
         const char c = (char)s_rb[s_tail];
         s_tail = (s_tail + 1u) & (RB_SIZE - 1u);
+        if (s_external) { continue; }   /* real receiver drained and discarded */
         raw_push(c);
         Nmea_Feed(&s_parser, &s_gps, c, now);
+    }
+}
+
+void GPS_SetExternal(bool on) { s_external = on; }
+
+void GPS_Inject(const uint8_t *buf, uint32_t n)
+{
+    const uint32_t now = HAL_GetTick();
+    for (uint32_t i = 0u; i < n; i++) {
+        raw_push((char)buf[i]);
+        Nmea_Feed(&s_parser, &s_gps, (char)buf[i], now);
     }
 }
 
