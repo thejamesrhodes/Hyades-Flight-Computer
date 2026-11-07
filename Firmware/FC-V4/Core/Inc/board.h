@@ -132,6 +132,22 @@
 #define CTRL_RD_GAIN_PITCHYAW  0.0f    /* 1/(rad/s), used only with PITCHYAW=1  */
 #define CTRL_EI_LIMIT          0.30f   /* ||e_I|| clamp (anti-windup)           */
 
+/* Roll law. 1 = the Matlab roll-tuning design (controller.m Mode 1, values
+ * from parameters_initialise_roll_control.m / sim_params.json): delta =
+ * -(c/q) p + bounded trim. 0 = INDI with the fixed CTRL_EFF_ROLL below, which
+ * HITL showed limit-cycles (G is really k_b*q: 270-5500 rad/s^2 per unit fin
+ * over the envelope against the fixed 160). */
+#define CTRL_ROLL_LAW          1
+#define CTRL_ROLL_C            70.0f    /* P.Controller.c (Pa s), Kp = c/q        */
+#define CTRL_ROLL_Q_MIN        2000.0f  /* Pa: schedule floor (envelope low end)  */
+#define CTRL_ROLL_Q_FALLBACK   40000.0f /* Pa: q_hat invalid -> lowest gain       */
+#define CTRL_ROLL_TRAVEL_RAD   0.2094f  /* P.Servo.Travel, +/-12 deg at the canard */
+#define CTRL_TRIM_KI           0.0234f  /* P.Trim.Ki                              */
+#define CTRL_TRIM_BAND_K       1.1f     /* P.Trim.BandK                           */
+#define CTRL_TRIM_DEADBAND_RAD 0.00196f /* P.Servo.Deadband (n = 1)               */
+#define CTRL_TRIM_CLAMP        0.1047f  /* P.Trim.Clamp, +/-6 deg                  */
+#define CTRL_TRIM_RATE         0.0524f  /* P.Trim.Rate, 3 deg/s                    */
+
 /* INDI control effectiveness  G : fin deflection [-1,+1] -> body angular accel
  * (rad/s^2).  PLACEHOLDERS — identify from a 6-DOF sim or flight log. They set
  * the increment scale; on the bench (no aero feedback) saturation bounds the
@@ -287,7 +303,13 @@
  * apogee 14.08 s) + 20 %. Set per motor. */
 #define CFG_PHASE_DETECT      1
 #define DET_LIFTOFF_ACC       (3.0f * BOARD_G_MPS2)
-#define DET_LIFTOFF_N         5u      /* 50 ms                                     */
+#define DET_LIFTOFF_N         10u     /* 100 ms above DET_LIFTOFF_ACC ...           */
+#define DET_LIFTOFF_V_MPS     8.0f    /* ... and nav v_up above this (HITL: a 6 g /
+                                       * 60 ms pad knock gave a false liftoff at the
+                                       * old 50 ms / acc-only rule)                 */
+#define DET_LIFTOFF_N_NOV     30u     /* 300 ms acc-only if nav is invalid          */
+#define NAV_BRIDGE_N          8u      /* frames: hold the last good specific force
+                                       * through IMU read gaps (< FDIR_IMU_READ_N)  */
 #define DET_T_BOOST_MIN_S     0.10f
 #define DET_BURNOUT_ACC       0.0f    /* axial f < 0: drag exceeds thrust          */
 #define DET_BURNOUT_N         5u

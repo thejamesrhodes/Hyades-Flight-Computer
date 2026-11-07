@@ -16,6 +16,13 @@
  *   G^+ is the closed-form pseudoinverse of the cruciform effectiveness matrix;
  *   this single operation is also the control allocation.
  *
+ * ROLL LAW (CTRL_ROLL_LAW). 0 = INDI as below. 1 = the Matlab roll-tuning
+ * design (controller.m, Mode 1): delta = -Kp(q) p + trim, Kp = c/q_e with
+ * q_e = clamp(q_hat, CTRL_ROLL_Q_MIN, ..), plus the bounded trim integrator
+ * (dead band, rate limit, clamp, freeze on saturation). Dither is NOT carried
+ * across: 125 Hz cannot be produced by a 100 Hz loop. Fins: all four take
+ * delta / FIN_DEFLECT (roll common mode), limited to the canard travel.
+ *
  * MODES (degraded-mode ladder, h743_flight_architecture 4.1). Each step down
  * depends on strictly fewer inputs; the mode is chosen by the fault arbiter:
  *   CTRL_MODE_FULL      geometric outer loop + INDI     (estimator + gyro)
@@ -53,6 +60,11 @@ typedef struct {
     CtrlMode mode;            /* set via Ctrl_SetMode() only                  */
     float fin_last[4];        /* last output (for bumpless mode changes)      */
 
+    /* q-scheduled roll law (CTRL_ROLL_LAW 1): dynamic pressure from NAV-01 */
+    float qbar;               /* Pa, last value given to Ctrl_SetQbar         */
+    bool  q_valid;            /* false -> CTRL_ROLL_Q_FALLBACK (low gain)     */
+    float trim;               /* bounded trim integrator, rad at the canard   */
+
     /* outer-loop integral on the Lie algebra (anti-windup: norm-clamped) */
     float e_I[3];
 
@@ -72,6 +84,15 @@ void Ctrl_Init(Controller *c);
 /* Change mode. No-op if unchanged; otherwise resets the integral and prepares
  * the INDI filters for a bumpless start from the last fin command. */
 void Ctrl_SetMode(Controller *c, CtrlMode mode);
+
+/* Dynamic pressure for the roll schedule (call before Ctrl_Update). A non-
+ * finite or invalid value selects CTRL_ROLL_Q_FALLBACK, the envelope's
+ * highest q, i.e. the lowest (always-stable, under-damped) gain. */
+void Ctrl_SetQbar(Controller *c, float qbar_pa, bool valid);
+
+/* q-scheduled roll law (exposed for tests): canard deflection command, rad,
+ * from roll rate p (rad/s). trim_on selects the bounded trim integrator. */
+float Ctrl_RollLaw(Controller *c, float p_radps, float dt, bool trim_on);
 
 /* One control step.
  *   q              : attitude quaternion [w x y z], body->world (estimator)

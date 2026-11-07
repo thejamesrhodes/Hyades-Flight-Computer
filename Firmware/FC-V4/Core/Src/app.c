@@ -90,6 +90,8 @@ static struct {
     Nav        nav;              /* NAV-01: h, v, q_hat                      */
     Detect     det;              /* flight-event detectors                  */
     uint32_t   gps_gga_seen;     /* GGA count last fed to nav               */
+    float      f_last[3];        /* last good specific force (nav bridging)  */
+    uint32_t   f_gap;            /* consecutive frames without a good sample */
 #if CFG_HITL
     uint32_t   hitl_idx;         /* last host sample index                  */
     bool       hitl_missing;     /* no host sample this frame               */
@@ -104,7 +106,8 @@ static const NavCfg k_nav_cfg = {
     .q_speed_min = NAV_Q_SPEED_MIN,
 };
 static const DetectCfg k_det_cfg = {
-    .liftoff_acc = DET_LIFTOFF_ACC, .liftoff_n = DET_LIFTOFF_N, .t_boost_min = DET_T_BOOST_MIN_S,
+    .liftoff_acc = DET_LIFTOFF_ACC, .liftoff_n = DET_LIFTOFF_N,
+    .liftoff_v = DET_LIFTOFF_V_MPS, .liftoff_n_nov = DET_LIFTOFF_N_NOV, .t_boost_min = DET_T_BOOST_MIN_S,
     .burnout_acc = DET_BURNOUT_ACC, .burnout_n = DET_BURNOUT_N, .apogee_n = DET_APOGEE_N,
     .t_apogee_max = DET_T_APOGEE_MAX_S, .t_land_min = DET_T_LAND_MIN_S, .t_land_max = DET_T_LAND_MAX_S,
     .land_acc_tol = DET_LAND_ACC_TOL, .land_gyro = DET_LAND_GYRO_RADPS, .land_v = DET_LAND_V_MPS,
@@ -253,6 +256,16 @@ static void task_estimate(void)
         const bool pad = !Phase_InFlight(ph) && (ph != PH_CATO_SAFE);
         Nav_Step(&A.nav, A.iekf.q, A.imu.accel, A.iekf.omega, A.dt, pad);
         nav_gps(ph);
+        for (uint32_t k = 0u; k < 3u; k++) { A.f_last[k] = A.imu.accel[k]; }
+        A.f_gap = 0u;
+    } else if ((A.f_gap < NAV_BRIDGE_N) && Phase_InFlight(phase_now())) {
+        /* Short read gap in flight: integrate the last good specific force
+         * (HITL: a 50 ms boost dropout otherwise cost ~13 % in q_hat). The
+         * attitude is held (no gyro), so this is only for a few frames. */
+        A.f_gap++;
+        Nav_Step(&A.nav, A.iekf.q, A.f_last, A.iekf.omega, A.dt, false);
+    } else {
+        A.f_gap++;
     }
     A.ckpt |= CK_EST;
 }
@@ -331,7 +344,7 @@ static void task_fdir(void)
     } else if (ph == PH_SETTLING) {
         A.ready_hold = (worst == SEV_INFO) ? (A.ready_hold + 1u) : 0u;
         if (A.ready_hold >= ((READY_HOLD_MS * FRAME_HZ) / 1000u)) { go_phase(PH_READY); }
-    } else if ((ph == PH_READY) && (worst == SEV_SOFT)) {
+    } else if ((ph == PH_READY) && (worst == SEV_SOFT) && !Detect_LiftoffPending(&A.det)) {
         A.ready_hold = 0u;
         go_phase(PH_SETTLING);                    /* demote; re-promotion needs the full hold */
     } else {
@@ -360,6 +373,7 @@ static void task_fdir(void)
 
 static void task_control(void)
 {
+    Ctrl_SetQbar(&A.ctrl, A.nav.qbar, Nav_QValid(&A.nav) && (A.ctrl.mode == CTRL_MODE_FULL));
     Ctrl_Update(&A.ctrl, A.iekf.q, A.iekf.omega, A.gyro_rad, A.dt, A.fin);
     for (uint8_t i = 0u; i < FIN_COUNT; i++) { PWM_SetFin(i, A.fin[i]); }
     A.ckpt |= CK_CTRL;

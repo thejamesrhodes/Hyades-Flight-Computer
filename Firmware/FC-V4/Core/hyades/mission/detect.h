@@ -8,7 +8,12 @@
  * accumulation, no explicit alpha/beta); the SPRT form is the H2 upgrade.
  * Counters reset on any phase change.
  *
- *   READY   -> BOOST    axial specific force > liftoff_acc for liftoff_n
+ *   READY   -> BOOST    axial specific force > liftoff_acc for liftoff_n AND
+ *                       nav v_up > liftoff_v; OR (nav invalid) > liftoff_acc
+ *                       for liftoff_n_nov. HITL found 50 ms at 3 g alone is
+ *                       met by a 6 g / 60 ms handling knock on the pad
+ *                       (sensor LPF stretches it); the knock gives only
+ *                       ~2 m/s, a motor 8 m/s within 0.04-0.2 s.
  *   BOOST   -> COAST    after t_boost_min, axial f < burnout_acc for burnout_n
  *   COAST   -> DESCENT  v_up < 0 for apogee_n (needs nav valid), OR the
  *                       time-since-burnout backup t_apogee_max
@@ -31,6 +36,8 @@
 typedef struct {
     float    liftoff_acc;     /* m/s^2, body axial (+nose)                    */
     uint16_t liftoff_n;
+    float    liftoff_v;       /* m/s, nav v_up also required                  */
+    uint16_t liftoff_n_nov;   /* persistence when nav is not valid            */
     float    t_boost_min;     /* s                                            */
     float    burnout_acc;     /* m/s^2                                        */
     uint16_t burnout_n;
@@ -63,6 +70,12 @@ typedef struct {
 } Detect;
 
 void  Detect_Init(Detect *d, const DetectCfg *c);
+
+/* True while the liftoff condition is building in READY (axial acceleration
+ * above threshold, not yet confirmed). The arbiter holds READY meanwhile: a
+ * fast motor clips the accelerometer and trips accel_rng (SOFT) within 5
+ * frames, before the 10-frame liftoff confirmation (HITL, I205W). */
+bool  Detect_LiftoffPending(const Detect *d);
 
 /* Returns the requested phase (== now when nothing is detected). */
 Phase Detect_Step(Detect *d, Phase now, const DetectIn *in, float dt);

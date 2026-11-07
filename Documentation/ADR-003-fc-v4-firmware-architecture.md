@@ -1,6 +1,6 @@
 # ADR-003: FC-V4 (STM32F411) firmware architecture and bench verification
 
-**Status:** accepted 3 November 2026; updated 7 November 2026 (single-port GPS, IMU noise capture, NAV-01, HITL-01). **Code:** `Hyades-Flight-Computer/Firmware/FC-V4`.
+**Status:** accepted 3 November 2026; updated 7 November 2026 (single-port GPS, IMU noise capture, NAV-01, HITL-01, q̂-scheduled roll law, HITL-02 worst-case campaign). **Code:** `Hyades-Flight-Computer/Firmware/FC-V4`.
 
 ## Context
 
@@ -36,7 +36,7 @@ The STM32H743 (V6) is still a CubeMX skeleton. The aim is to reach the H743 with
 5. **Housekeeping.**
    - Removed the legacy LSM303/L3GD20 backend.
    - V4 is under git.
-   - Unity host tests: 70 as of 7 Nov. On 3 Nov there were 55; an earlier draft of this ADR said 58, which was a miscount.
+   - Unity host tests: 73 as of 7 Nov. On 3 Nov there were 55; an earlier draft of this ADR said 58, which was a miscount.
    - A check that the Python decoder reads records packed by the firmware.
 6. **Operator fault clear (added 3 Nov, James's choice).**
    - `faults clear` (console F8) works on the pad only, and is refused while a HARD monitor is still failing.
@@ -54,6 +54,13 @@ The STM32H743 (V6) is still a CubeMX skeleton. The aim is to reach the H743 with
    - `CFG_HITL` lockstep seam with 0x10/0x11/0x12 frames.
    - Compiled out at 0.
    - A `CFG_FLIGHT_BUILD` compile guard rejects any bench feature left on.
+10. **Roll law scheduled on q̂ (7 Nov, closes H3).** `CTRL_ROLL_LAW = 1` replaces the placeholder fixed-effectiveness INDI roll channel, which limit-cycled at 720 °/s in HITL.
+   - The law is the MATLAB `controller.m` Mode 1: δ = −(c/q̂)·p + bounded trim, with c = 70.
+   - Trim settings: Ki 0.0234, band 1.1, deadband 0.00196, clamp ±0.1047 rad, rate 0.0524 rad/s. Travel is ±0.2094 rad.
+   - When q̂ < 2 kPa, or NAV is saturated or invalid, the law uses a 40 kPa fallback gain.
+   - RATE_DAMP uses the same law with trim off. Trim resets on OFF.
+11. **NAV dropout bridging.** During flight, up to `NAV_BRIDGE_N` = 8 missing IMU frames are integrated with the last specific force. This cut a boost-dropout q̂ error from 12.7 % to 0.9 %.
+12. **Liftoff velocity gate.** Liftoff needs either 10 frames above threshold with v_up > 8 m/s, or 30 frames of acceleration alone. A 6 g / 60 ms pad knock no longer triggers it.
 
 ## Host tools
 
@@ -126,6 +133,9 @@ The STM32H743 (V6) is still a CubeMX skeleton. The aim is to reach the H743 with
 - `CFG_HITL = 0` builds clean and links no HITL code.
 - HITL: 10⁵ lockstep frames with 0 missed. Frame compute in HITL is ≤ 0.46 ms, because the I2C read is replaced by the host sample.
 - Detectors and NAV verified for the G79W and I205W profiles (HITL-01, NAV-01).
+- **Worst-case HITL campaign: 29 cases** covering vibration, dispersions, injections, GPS faults and I205W (HITL-02; figures in `Images/hitl/`).
+  - Nominal G79W: roll ≤ 46 °/s, canard command ≤ 1.1°, q̂ error −0.9 %, apogee detected +0.04 s late.
+  - Final build re-verified on hardware: 73 Unity tests and 12 tool tests pass.
 
 ## Deviations from the software design guidelines (accepted for the F411 bench board)
 
@@ -141,7 +151,13 @@ The STM32H743 (V6) is still a CubeMX skeleton. The aim is to reach the H743 with
 
 - Verify `REMAP_QMI` against the airframe (roll sign, nose-up |a|).
 - GPS: confirm a fix outdoors, and confirm the MRC site elevation and coordinates.
-- **H3: schedule the roll effectiveness on q̂.** The fixed `CTRL_EFF_ROLL` limit-cycles in HITL closed loop (HITL-01). Size `CTRL_KW_ROLL` and `CTRL_RD_GAIN_ROLL` from the roll-tuning model.
+- ~~H3~~: closed by decision 10. Still to do: re-run `optimise_roll_schedule` with a 100 Hz ZOH and the q̂ error model (HITL-02 combined-worst case shows a 4 Hz limit cycle up to 1124 °/s).
+- **Open failure modes from HITL-02:**
+  - Vibration clipping inside the IMU is invisible to the firmware: −8.7 m/s velocity error and apogee detected 0.83 s early. Measure the real vibration level.
+  - Accelerometer saturation leaves only the backup apogee timer, which fires +2.5 to +7 s late. Add a per-motor timer or a ballistic apogee check.
+  - Without GPS, landing is detected only by the 300 s timer.
+  - A 10 g / 200 ms pad knock still causes a false liftoff. Add an arming step.
+  - At 3σ Cl₀, roll settles at 46 °/s, limited by the trim clamp.
 - **Motor choice: peak ≤ 14 g.** The I205W, at 30 g, saturates the IMU. If it is kept, add a q(t) fallback or a higher-range accelerometer.
 - Heading variance is unbounded without a magnetometer (resolved on the H743, which has one).
 - Port to the H743: replace the `Core/Src` drivers (SPI/DMA IMU, LL timers, MPU/cache).

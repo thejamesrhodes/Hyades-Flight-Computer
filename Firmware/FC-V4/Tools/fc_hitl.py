@@ -104,7 +104,7 @@ class Link:
         try:
             while time.monotonic() < t_end:
                 self.pump()
-                if any(text in l for l in seen):
+                if any(t in l for t in ((text,) if isinstance(text, str) else text) for l in seen):
                     return True
             return False
         finally:
@@ -140,7 +140,7 @@ def reboot_to_settle(lk: Link, log) -> None:
     lk.close()
     time.sleep(2.0)
     lk.open(20.0)
-    if not lk.wait_line("->SETTLE", 15.0):
+    if not lk.wait_line(("->SETTLE", "->READY"), 15.0):
         lk.close()
         fc.die("board did not reach SETTLING after the reboot")
     lk.cmd("stream off")
@@ -152,6 +152,10 @@ def run(args) -> dict:
     out_dir = os.path.join(HERE, "logs", "hitl")
     os.makedirs(out_dir, exist_ok=True)
     tag = f"{stamp}_{args.mode}" + (f"_{args.motor}" if args.mode == "flight" else "")
+    if getattr(args, "name", None):
+        tag += "_" + args.name
+    out_dir = getattr(args, "out_dir", None) or out_dir
+    os.makedirs(out_dir, exist_ok=True)
     lines_f = open(os.path.join(out_dir, tag + ".txt"), "w", encoding="utf-8")
     events = []
 
@@ -164,10 +168,16 @@ def run(args) -> dict:
 
     P, psrc = hm.load_params(args.params)
     motor = hm.load_openrocket(os.path.join(hm.SIM_DIR, MOTORS[args.motor]))
+    sim = dict(getattr(args, "sim", None) or {})
+    if "vib" in sim:
+        sim["vib"] = hm.VibCfg(**sim["vib"])
     cfg = hm.SimCfg(site_elev=args.elev, wind_enu=(args.wind, 0.0, 0.0), cl0=args.cl0,
-                    use_fins=args.closed, seed=args.seed)
+                    use_fins=args.closed, seed=args.seed, **sim)
     imu = hm.ImuCfg(acc_sf=(args.acc_sf, args.acc_sf, args.acc_sf))
-    veh = hm.Vehicle(motor, P, cfg, imu)
+    gcfg = hm.GpsCfg(**(getattr(args, "gps_cfg", None) or {}))
+    veh = hm.Vehicle(motor, P, cfg, imu, gcfg)
+    injections = list(getattr(args, "inject", None) or [])     # [{"kind","t0","t1"}], s after ignition
+    gps_fault = dict(getattr(args, "gps_fault", None) or {})
     print(f"plant: {motor.name}, params={psrc}, site {args.elev:.0f} m, wind {args.wind} m/s, "
           f"{'closed' if args.closed else 'open'} loop, acc SF {args.acc_sf:+.3f}")
 
@@ -177,6 +187,7 @@ def run(args) -> dict:
     fin = np.zeros(4)
     t_world = 0.0
     phase_t: dict[str, float] = {}
+    pre_ign: list[str] = []
     ignite_at = None
     max_frames = args.frames if args.mode == "static" else int((args.pad_max + 400.0) * 100)
     landed_t = None
@@ -185,7 +196,26 @@ def run(args) -> dict:
             veh.frame(fin)
             t_world += 0.01
             nmea = veh.gps_bytes(t_world) if args.gps else b""
-            r = lk.step(idx, veh.imu.out_a, veh.imu.out_g, nmea)
+            acc, gyr, flags = veh.imu.out_a.copy(), veh.imu.out_g.copy(), 0
+            tf = veh.t if veh.ignited else -1e9
+            for inj in injections:
+                if inj["t0"] <= tf < inj["t1"]:
+                    if inj["kind"] == "fail":
+                        flags |= SF_FAIL
+                    elif inj["kind"] == "nan":
+                        acc[:] = float("nan")
+                    elif inj["kind"] == "sat":
+                        acc[:] = 16.0 * hm.G0 - hm.G0 / 2048.0
+                    elif inj["kind"] == "gyro_spike":
+                        gyr[2] = 2047.0
+            if nmea:
+                off = gps_fault.get("off")
+                garb = gps_fault.get("garbage")
+                if off and off[0] <= tf < off[1]:
+                    nmea = b""
+                elif garb and garb[0] <= tf < garb[1]:
+                    nmea = bytes(veh.rng.integers(32, 127, len(nmea), dtype=np.uint8)) + b"\r\n$GPGGA,1,2,3*00\r\n"
+            r = lk.step(idx, acc, gyr, nmea, flags)
             idx += 1
             if r is None:
                 continue
@@ -194,15 +224,18 @@ def run(args) -> dict:
             ph = link.PHASES[r["phase"]] if r["phase"] < len(link.PHASES) else "?"
             if ph not in phase_t:
                 phase_t[ph] = veh.t if veh.ignited else -1.0
+            if not veh.ignited and ph not in pre_ign:
+                pre_ign.append(ph)
             tr = veh.truth()
             rows.append([idx, veh.t if veh.ignited else -veh.t_pad, ph, r["mode"], r["faults"], r["loop_us"],
                          r["nav_flags"], r["hitl_flags"], r["h"], r["v_up"], r["speed"], r["qbar"],
                          r["f0"], r["qw"], r["qx"], r["qy"], r["qz"],
                          tr["h"], tr["vz"], tr["speed"], tr["qbar"], tr["mach"], tr["p_dps"], tr["delta_deg"],
-                         tr["qw"], tr["qx"], tr["qy"], tr["qz"]])
+                         tr["qw"], tr["qx"], tr["qy"], tr["qz"], float(gyr[2]), float(acc[2]), r["f1"], r["f2"], r["f3"]])
             if args.mode == "flight":
                 if ignite_at is None:
-                    if ph == "READY" and (r["nav_flags"] & NAV_F_INIT) and veh.t_pad >= args.pad_min:
+                    force = getattr(args, "ignite_regardless", False) and veh.t_pad >= args.pad_min
+                    if force or (ph == "READY" and (r["nav_flags"] & NAV_F_INIT) and veh.t_pad >= args.pad_min):
                         ignite_at = idx
                         print(f"   host: READY after {veh.t_pad:.1f} s on the pad -> IGNITION")
                         veh.ignite()
@@ -213,7 +246,7 @@ def run(args) -> dict:
                     landed_t = landed_t if landed_t is not None else veh.t
                     if veh.t > landed_t + args.post_land:
                         break
-                if ph in ("LOCKOUT", "CATO"):
+                if ph in ("LOCKOUT", "CATO") and not getattr(args, "run_through", False):
                     print(f"   host: board in {ph} -- stopping")
                     break
             if idx % 1000 == 0:
@@ -228,7 +261,8 @@ def run(args) -> dict:
 
     hdr = ["frame", "t", "phase", "mode", "faults", "loop_us", "nav_flags", "hitl_flags", "h", "v_up", "speed",
            "qbar", "fin0", "qw", "qx", "qy", "qz", "h_true", "vz_true", "speed_true", "qbar_true", "mach",
-           "p_true_dps", "delta_true_deg", "qw_true", "qx_true", "qy_true", "qz_true"]
+           "p_true_dps", "delta_true_deg", "qw_true", "qx_true", "qy_true", "qz_true", "gz_meas_dps",
+           "az_meas", "fin1", "fin2", "fin3"]
     csv_path = os.path.join(out_dir, tag + ".csv")
     with open(csv_path, "w") as f:
         f.write(",".join(hdr) + "\n")
@@ -236,6 +270,11 @@ def run(args) -> dict:
             f.write(",".join(f"{x:.6g}" if isinstance(x, float) else str(x) for x in r) + "\n")
 
     summ = summarise(rows, hdr, phase_t, veh, motor, idx, lk.timeouts, wall, psrc, args)
+    summ["name"] = getattr(args, "name", "")
+    summ["pre_ignition_phases"] = pre_ign
+    summ["csv"] = csv_path
+    summ["imu_internal_clips"] = veh.imu.clip_count
+    summ["board_events"] = [e[1] for e in events]
     with open(os.path.join(out_dir, tag + ".json"), "w") as f:
         json.dump(summ, f, indent=2)
     print(json.dumps(summ, indent=2))
@@ -271,6 +310,16 @@ def summarise(rows, hdr, phase_t, veh, motor, n_sent, timeouts, wall, psrc, args
     ia = int(np.argmin(np.abs(t - (veh.t_apogee or 0))))
     s["apogee"] = {"true_m": round(float(ht.max()), 1), "board_at_true_apogee_m": round(float(h[ia]), 1),
                    "openrocket_m": round(motor.ref["apogee"], 1)}
+    pt = np.array(a["p_true_dps"], float)
+    fl = (t > 0.0) & (t < (veh.t_apogee or 0))
+    if fl.any():
+        fins = np.array(a["fin0"], float)[fl] * 30.0
+        s["roll"] = {"p_rms_dps": round(float(np.sqrt(np.mean(pt[fl] ** 2))), 2),
+                     "p_max_abs_dps": round(float(np.abs(pt[fl]).max()), 1),
+                     "p_final_coast_mean_dps": round(float(pt[fl][-100:].mean()), 2),
+                     "fin_cmd_sat_frac": round(float(np.mean(np.abs(fins) >= 11.99)), 3),
+                     "fin_cmd_max_deg": round(float(np.abs(fins).max()), 2),
+                     "roll_revs": round(float(np.sum(pt[fl]) * 0.01 / 360.0), 2)}
     sat = np.array(a["nav_flags"]) & NAV_F_SAT
     s["nav_saturated_frames"] = int((sat > 0).sum())
     gps = np.array(a["nav_flags"]) & NAV_F_GPS_AIDED

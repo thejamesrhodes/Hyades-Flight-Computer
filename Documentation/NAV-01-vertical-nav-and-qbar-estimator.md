@@ -44,7 +44,7 @@ A loosely coupled block, kept separate from the IEKF. Nothing aids velocity in f
 
    | Edge | Rule | Constants |
    |---|---|---|
-   | READY → BOOST | axial f > 3 g for 50 ms | G79W peak 8.3 g, I205W 30 g |
+   | READY → BOOST | axial f > 3 g for 100 ms **and** v_up > 8 m/s; or 300 ms of acceleration alone if nav is saturated. READY is held while liftoff is being confirmed. | Changed after HITL-02: the old rule (50 ms, acceleration only) fired on a 6 g / 60 ms pad knock |
    | BOOST → COAST | after 0.1 s, axial f < 0 for 50 ms | |
    | COAST → DESCENT | v_up < 0 for 50 ms (nav valid), else timer 15 s after COAST entry | I205W coast 12.2 s + 20 % |
    | DESCENT → LANDED | after 5 s: \|f\| ≈ g, \|ω\| < 0.2 rad/s, GPS-aided \|v_up\| < 1.5 m/s for 2 s; else timer 300 s | |
@@ -64,6 +64,8 @@ A loosely coupled block, kept separate from the IEKF. Nothing aids velocity in f
 - **Error budget confirmed.** A 2 % scale-factor error gives about 3 % in q̂. The prediction was 2δv/V ≈ 4 %. Both are well inside the ±30 % the schedule tolerates.
 - **Early burnout is real physics, not a bug.** Axial f goes negative when drag exceeds thrust during tail-off, about 0.2–0.35 s before OpenRocket's burnout event.
 - **Descent height error with GPS aiding:** 2.3 m RMS, 5.4 m max (G79W).
+
+**Since HITL-02:** read gaps of up to 8 frames in flight are bridged with the last good specific force (a 5-frame boost dropout now costs 0.9 % in q̂ instead of 12.7 %). See HITL-02 for the vibration-clipping and saturation findings.
 
 ## Constraint on motor selection (confirmed)
 - Peak boost acceleration must be ≤ 14 g.
