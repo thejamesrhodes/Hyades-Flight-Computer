@@ -260,4 +260,66 @@
  * timeout used around flash erase (sector erase is up to 2 s, RM0383). */
 #define WDG_LONG_RELOAD       4095u  /* with prescaler /256: ~32 s at 32 kHz LSI */
 
+/* ----------------------------------------------------------------------------
+ * 10. NAVIGATION, q_hat AND FLIGHT-EVENT DETECTION (NAV-01, nav.c, detect.c)
+ * -------------------------------------------------------------------------- */
+/* Site: MRC (Midland Rocketry Club), near Twycross, Leicestershire. The pad
+ * elevation is NOT VERIFIED - the value below is an estimate for the area.
+ * It is replaced on the pad by the GPS altitude average when a fix is held,
+ * and density only moves ~1 %/100 m, so +/-50 m is ample. */
+#define NAV_SITE_ELEV_M       110.0f
+#define NAV_SAT_MPS2          (15.5f * BOARD_G_MPS2)  /* = FDIR accel range bound */
+#define NAV_STILL_ACC_MPS2    0.5f    /* pad zeroing: | |f| - g | below this ...   */
+#define NAV_STILL_GYRO_RADPS  0.10f   /* ... and |w| below this (5.7 dps)          */
+#define NAV_ACC_PSD           0.01f   /* (m/s^2)^2/Hz: VRW is ~5e-7 (measured); this
+                                       * covers scale/misalignment error in boost  */
+#define NAV_GPS_VAR_M2        100.0f  /* (10 m)^2, ATGM336H altitude, unverified   */
+#define NAV_GPS_NIS_MAX       16.0f   /* chi^2(1) 4-sigma gate                     */
+#define NAV_GPS_REJ_RESET     5u      /* consecutive rejections -> re-anchor to GPS */
+#define NAV_GPS_V_VAR         100.0f  /* (m/s)^2 v_up after a re-anchor            */
+#define NAV_GPS_HDOP_MAX      3.0f    /* fix quality for use (pad and descent)     */
+#define NAV_GPS_SATS_MIN      6u
+#define NAV_Q_SPEED_MIN       5.0f    /* m/s: below this q_hat is reported as 0    */
+
+/* Detectors. Thresholds from the OpenRocket model (62mm Canard Control V1.0.0):
+ * G79W peak 8.3 g, I205W 30 g; liftoff at 3 g is >= 2.8x margin below both and
+ * 3x above the 1 g pad. Apogee backup: I205W coast 12.2 s (burnout 1.89 s,
+ * apogee 14.08 s) + 20 %. Set per motor. */
+#define CFG_PHASE_DETECT      1
+#define DET_LIFTOFF_ACC       (3.0f * BOARD_G_MPS2)
+#define DET_LIFTOFF_N         5u      /* 50 ms                                     */
+#define DET_T_BOOST_MIN_S     0.10f
+#define DET_BURNOUT_ACC       0.0f    /* axial f < 0: drag exceeds thrust          */
+#define DET_BURNOUT_N         5u
+#define DET_APOGEE_N          5u
+#define DET_T_APOGEE_MAX_S    15.0f   /* after burnout                             */
+#define DET_T_LAND_MIN_S      5.0f
+#define DET_T_LAND_MAX_S      300.0f  /* I205W descent 145 s (OpenRocket) x 2      */
+#define DET_LAND_ACC_TOL      1.0f
+#define DET_LAND_GYRO_RADPS   0.2f
+#define DET_LAND_V_MPS        1.5f
+#define DET_LAND_N            200u    /* 2 s                                       */
+
+/* ----------------------------------------------------------------------------
+ * 11. HARDWARE-IN-THE-LOOP (HITL-01, hitl.c)
+ *
+ * CFG_HITL 1 compiles the seam in. It stays dormant (real IMU, timer-paced
+ * frames) until the host sends its first 0x10 SAMPLE frame; from then on the
+ * IMU sample comes from the host, each sample starts exactly one frame
+ * (lockstep), the GPS parser takes host NMEA (0x12) instead of USART2, and a
+ * 0x11 REPLY is sent at the end of every frame. A frame whose sample does not
+ * arrive within HITL_WAIT_US runs with a failed IMU read, so a dead host
+ * trips imu_read exactly as a dead sensor would. Must be 0 in flight builds.
+ * -------------------------------------------------------------------------- */
+#define CFG_HITL              1
+#define HITL_WAIT_US          20000u  /* < IWDG (~100 ms) with margin           */
+
+/* Flight-build guard: define CFG_FLIGHT_BUILD=1 (compiler -D) for a flight
+ * image; the bench-only features must then be off or the build fails. */
+#if defined(CFG_FLIGHT_BUILD)
+#if (CFG_FLIGHT_BUILD != 0) && ((CFG_HITL != 0) || (CFG_FAULT_INJECTION != 0) || (CFG_BENCH_ACTUATE_READY != 0))
+#error "flight build with a bench feature enabled (CFG_HITL / CFG_FAULT_INJECTION / CFG_BENCH_ACTUATE_READY)"
+#endif
+#endif
+
 #endif /* BOARD_H */

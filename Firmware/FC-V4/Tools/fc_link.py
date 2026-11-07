@@ -114,7 +114,7 @@ _STATUS = re.compile(
     r"\|a\|=(?P<an>\S+) fin (?P<f0>\S+) (?P<f1>\S+) (?P<f2>\S+) (?P<f3>\S+) "
     r"imu=(?P<imu>\w+)\((?P<imu_fails>\d+)\) loop=(?P<loop>\d+) ovr=(?P<ovr>\d+) "
     r"gps=(?P<gps>\w+) s(?P<sats>\d+) alt=(?P<alt>\S+) rx=(?P<gps_rx>\d+) nmea=(?P<nmea>\d+) "
-    r"log=(?P<log>\d+)%")
+    r"log=(?P<log>\d+)%(?: h=(?P<h>\S+) vz=(?P<vz>\S+) q=(?P<qbar>\S+))?")
 _EVENT = re.compile(r"\[EVT\] t=(?P<ms>\d+) ms (?P<phase>\w+): (?P<text>.*)$")
 _BUILD = re.compile(r"build (\S+)")
 _FLOATS = ("roll", "pitch", "yaw", "wx", "wy", "wz", "an", "f0", "f1", "f2", "f3", "alt")
@@ -130,6 +130,8 @@ def parse_status(line: str) -> dict | None:
            "active": int(d["fa"], 16), "latched": int(d["fl"], 16)}
     out.update({k: num(d[k]) for k in _FLOATS})
     out.update({k: int(d[k]) for k in _INTS})
+    for k in ("h", "vz", "qbar"):                  # NAV-01 fields (newer firmware)
+        out[k] = num(d[k]) if d.get(k) is not None else float("nan")
     return out
 
 

@@ -21,7 +21,7 @@ P.Vehicle.Ixx = 0.0007; %Inertia / kg m^2 STALE -- UPDATE FROM CAD
                         % below is conditional on it. Take both from the
                         % SolidWorks mass properties of the as-built assembly
                         % before any result from this file is quoted.
-                        optimise_roll_schedule.m now reads Ixx
+                        % optimise_roll_schedule.m now reads Ixx
                         % from here rather than keeping its own copy, so fixing
                         % it here fixes the schedule too.
 P.Vehicle.d = 0.062;    %Body Diameter / m

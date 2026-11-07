@@ -210,12 +210,19 @@ class StripChart(tk.Canvas):
     """
 
     def __init__(self, app, master, title: str, unit: str, names: tuple, keys: tuple, yrange: float,
-                 scales: tuple = ()):
+                 scales: tuple = (), ranges: tuple = ()):
         super().__init__(master, height=170, highlightthickness=1, bd=0)
         self.app, self.title, self.unit = app, title, unit
         self.names, self.keys, self.yr = names, keys, yrange
         self.scales = scales or (1.0,) * len(keys)        # plotted = value * scale; legend shows value
+        self.ranges = ranges or (yrange,)                 # click the chart to step through these
         self.bind("<Configure>", lambda _e: self.draw())
+        self.bind("<Button-1>", lambda _e: self._next_range())
+
+    def _next_range(self) -> None:
+        r = self.ranges
+        self.yr = r[(r.index(self.yr) + 1) % len(r)] if self.yr in r else r[0]
+        self.draw()
 
     def draw(self) -> None:
         a, c = self.app, self.app.c
@@ -240,15 +247,21 @@ class StripChart(tk.Canvas):
         lx = x0 + 160
         for j, (name, key, k) in enumerate(zip(self.names, self.keys, self.scales)):
             col = SERIES[j % len(SERIES)]
-            pts = []
+            pts, clipped = [], []
             for t, d in hist:
                 v = d.get(key)
                 if v is None or v != v:
                     continue
                 vc = max(-self.yr, min(self.yr, v * k))
-                pts += [x1 - (now - t) / span * (x1 - x0), mid - vc / self.yr * (y1 - y0) / 2]
+                x, y = x1 - (now - t) / span * (x1 - x0), mid - vc / self.yr * (y1 - y0) / 2
+                pts += [x, y]
+                if vc != v * k:
+                    clipped.append((x, y))
             if len(pts) >= 4:
                 self.create_line(*pts, fill=col, width=2)
+            for x, y in clipped:                               # off-scale samples: triangle on the rail
+                dy = 6 if y <= mid else -6
+                self.create_polygon(x - 4, y + dy, x + 4, y + dy, x, y, fill=col, outline="")
             cur = hist[-1][1].get(key) if hist else None
             txt = f"{name} {cur:+.1f}" if isinstance(cur, float) and cur == cur else f"{name} --"
             self.create_rectangle(lx, 8, lx + 10, 18, fill=col, outline="")
@@ -700,15 +713,19 @@ class App:
             self.plot_btns[sec] = b
         self.b_freeze = self._button(bar, "Freeze   Space", self.toggle_freeze)
         self.b_freeze.pack(side="left", padx=(16, 0))
-        note = tk.Label(bar, font=self.f_ui, text="Fixed scales; clipped values sit on the top/bottom line.")
+        note = tk.Label(bar, font=self.f_ui, text="Fixed scales; off-scale samples marked with a triangle on the rail.")
         note.pack(side="left", padx=(16, 0))
         self.dim_labels.append(note)
         self.charts = [
             StripChart(self, p, "Attitude", "deg; yaw drawn at half scale", ("roll", "pitch", "yaw"),
                        ("roll", "pitch", "yaw"), 90.0, (1.0, 1.0, 0.5)),
-            StripChart(self, p, "Body rates", "deg/s", ("x", "y", "z"), ("wx", "wy", "wz"), 100.0),
+            StripChart(self, p, "Body rates", "deg/s; click to rescale", ("x", "y", "z"), ("wx", "wy", "wz"),
+                       500.0, ranges=(100.0, 500.0, 2000.0)),
             StripChart(self, p, "Fin commands", "x100 %", ("0 top", "1 right", "2 bottom", "3 left"),
                        ("f0", "f1", "f2", "f3"), 100.0),
+            StripChart(self, p, "Nav (NAV-01)", "h m, v_up m/s, q kPa drawn x10; click to rescale",
+                       ("h", "v_up", "q kPa"), ("h", "vz", "qbar"), 1500.0, (1.0, 1.0, 10.0),
+                       ranges=(50.0, 300.0, 1500.0)),
         ]
         for ch in self.charts:
             ch.pack(fill="both", expand=True, padx=8, pady=(0, 6))
@@ -740,7 +757,9 @@ class App:
 
     def _plot_add(self, st: dict) -> None:
         if not self.plot_frozen:
-            d = {k: st.get(k) for k in ("roll", "pitch", "yaw", "wx", "wy", "wz")}
+            d = {k: st.get(k) for k in ("roll", "pitch", "yaw", "wx", "wy", "wz", "h", "vz")}
+            q = st.get("qbar")
+            d["qbar"] = q / 1000.0 if isinstance(q, float) else None
             for i in range(4):
                 f = st.get(f"f{i}")
                 d[f"f{i}"] = f * 100 if isinstance(f, float) else None

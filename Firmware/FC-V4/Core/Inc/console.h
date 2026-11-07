@@ -23,6 +23,9 @@ void        Con_Init(const ConCmd *cmds, uint32_t n);
 
 /* Read received bytes (at most 64 per call) and run completed commands. */
 void        Con_Poll(void);
+/* Feed received bytes to the line editor (Con_Poll reads USB itself; the HITL
+ * demux strips its binary frames first and passes the rest here). */
+void        Con_Feed(const uint8_t *buf, uint32_t n);
 
 /* printf-style output, integer formats only. */
 void        Con_Printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

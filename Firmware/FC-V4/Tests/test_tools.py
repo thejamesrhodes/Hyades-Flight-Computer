@@ -216,5 +216,35 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(self.dev.fw_writes, 1)
 
 
+
+class Hitl(unittest.TestCase):
+    """HITL-01 host side: wire formats match hitl.h, plant matches OpenRocket."""
+
+    def test_frames_round_trip_through_demux(self):
+        import fc_hitl as hl
+        self.assertEqual(hl.SAMPLE.size, 32)
+        self.assertEqual(hl.REPLY.size, 60)
+        payload = hl.REPLY.pack(7, 3, 2, 0x80, 321, 1, 0, *([0.1] * 4), 1.0, 0, 0, 0, 12.5, -1.0, 30.0, 550.0)
+        frm = hl.frame(hl.MSG_REPLY, payload)
+        d = link.StreamDemux()
+        ev = d.feed(b"text\r\n" + frm[:5]) + d.feed(frm[5:])
+        self.assertEqual(ev[0], ("line", "text"))
+        self.assertEqual(ev[1][0:2], ("frame", hl.MSG_REPLY))
+        r = dict(zip(hl.REPLY_FIELDS, hl.REPLY.unpack(ev[1][2])))
+        self.assertEqual((r["idx"], r["phase"], r["loop_us"]), (7, 3, 321))
+        self.assertAlmostEqual(r["qbar"], 550.0)
+
+    def test_plant_reproduces_openrocket(self):
+        import numpy as np
+        import hitl_model as hm
+        P, _src = hm.load_params()
+        m = hm.load_openrocket(os.path.join(hm.SIM_DIR, "or_sim1_G79W.csv"))
+        v = hm.Vehicle(m, P, hm.SimCfg(site_elev=46.0, use_fins=False, dt=0.002))
+        v.ignite()
+        while v.t_apogee is None and v.t < 30:
+            v.frame(np.zeros(4))
+        self.assertLess(abs(v.apogee - m.ref["apogee"]) / m.ref["apogee"], 0.02)
+        self.assertLess(abs(v.t_apogee - m.ref["t_apogee"]), 0.3)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

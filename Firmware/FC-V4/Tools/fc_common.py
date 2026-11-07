@@ -76,7 +76,7 @@ def wait_for(ser, prefixes: tuple[str, ...], timeout_s: float, echo: bool = True
             if idx >= 0:
                 return line[idx:]
         if echo and line:
-            print(f"   {line}")
+            print(f"   {line}".encode("ascii", "replace").decode("ascii"))   # cp1252 consoles
 
 
 def quiet(ser) -> None:

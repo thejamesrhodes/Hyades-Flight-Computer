@@ -78,7 +78,11 @@ static void dispatch(char *line)
 void Con_Poll(void)
 {
     uint8_t buf[64];
-    const uint32_t n = UsbIo_Read(buf, sizeof buf);
+    Con_Feed(buf, UsbIo_Read(buf, sizeof buf));
+}
+
+void Con_Feed(const uint8_t *buf, uint32_t n)
+{
     for (uint32_t i = 0u; i < n; i++) {
         const char c = (char)buf[i];
         if ((c == '\r') || (c == '\n')) {
