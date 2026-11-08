@@ -1,6 +1,6 @@
 # ADR-004: 200 Hz synchronous loop, pre-trigger flight log, flight-core SITL, and roll-law retune
 
-**Status:** accepted 8 November 2026 (James: 200 Hz synced PWM, OpenRocket inertia now and measured later, flight 1 passive or damped, ≤ 14 g motor shortlist).
+**Status:** accepted 8 November 2026 (James: 200 Hz synced PWM, OpenRocket inertia now and measured later, ≤ 14 g motor shortlist; checkpoint: flight 1 = full rate law, requirements tightened, V6 IMU log and high-g adopted).
 **Supersedes:** ADR-003 decision 10 gains (c = 70) and the H3 open item.
 **Code:** `Firmware/FC-V4` at the commit that adds this file.
 **Evidence:**
@@ -184,7 +184,7 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
 | MATLAB cross-check | Matches the Python port (§3.1). |
 | SITL vs OpenRocket | G79W apogee 432.7 m vs 439 m (3 m/s wind, 3° rail tilt in SITL); t_apogee 9.59 vs 9.66 s. I205W 1 291.6 vs 1 303 m. |
 | SITL Monte Carlo | Final build including dither, build tolerances met: **1 200 / 1 200 flights pass R1–R9**. Coast roll RMS p95 22 °/s; peak p95 112 °/s. Full campaign set in MC-01. |
-| Hardware HITL, 8 Nov, final build | 9 / 9 cases OK: nominal, wind 9 m/s + gust, vibration nominal and worst, 25 ms boost dropout, NaN sample, no GPS, pad knock, I205W. G79W nominal: roll peak 105 °/s, RMS 32 °/s, canards ≤ 1.1°, q̂ error 0.9 % RMS. |
+| Hardware HITL, 8 Nov | Pre-dither build: 9 / 9 cases OK (nominal, wind 9 m/s + gust, vibration nominal and worst, 25 ms boost dropout, NaN sample, no GPS, pad knock, I205W). **Final build with dither** (`campaign-20261108-103621`): 4 / 4 OK. G79W nominal roll peak 95 °/s (was 105), RMS 29 °/s (was 32), canards ≤ 1.15°, q̂ error 0.9 % RMS, loop p99 329 µs. |
 
 ## 9. Consequences for hardware (V6 / H743 and the airframe)
 
@@ -195,17 +195,16 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
    - bearing Coulomb torque ≤ 6 mN m (spin-down test).
    
    MC-01: with these met, 100 % pass. With the wide tolerance (σ_cant 0.25°), 3.2 % cross the lock-in limit.
-3. **V6 additions:**
-   - can spin sensor: a magnet and hall sensor on the bearing, which allows friction feedforward and lock-in monitoring;
-   - servo position feedback (BMS servos have none) or per-channel servo current sense, for hard-over detection;
-   - pre-trigger ring in H743 backup SRAM;
-   - an IMU range above 16 g if anything beyond the shortlist is flown.
+3. **V6 additions** (BP-01 §5; James, 8 Nov):
+   - **adopted:** raw IMU at ≥ 1 kHz to SD; a high-g accelerometer (±100–200 g);
+   - **proposed:** pre-trigger ring index in H743 backup SRAM, synchronous servo timers, servo rail sensing;
+   - **not adopted:** can spin sensor and servo position/current feedback. Their risks are carried by the build tolerances and the gain boost; hard-over stays a residual hazard.
 4. **Linkage ratio n:** in the 6DOF it does not help the roll floor (friction dominates, not the dead band). Keep n = 1 unless the canards are resized.
 
 ## 10. Open items
 
 - Re-run `optimise_roll_schedule`, `montecarlo_roll_control` and Simulink with c = 15 and the torque-space trim, so the MATLAB suite matches the flight code.
-- Hardware HITL re-run of the dither build (built clean; waiting for COM8).
+- ~~Hardware HITL re-run of the dither build~~: done, 4 / 4 OK (§8).
 - ~~Flight 1 mode~~: **decided 8 Nov: full rate law** (zero-rate target, no angle hold; `CFG_CTRL_SHADOW 0`).
 - Requirements tightened (MC-01 §3): peak ≤ 240 °/s, coast RMS ≤ 45 °/s, lock-in ≤ 0.6. The flight configuration passes 1 200 / 1 200.
 - V6: ≥ 1 kHz IMU to SD and a high-g accelerometer adopted (BP-01 §5).

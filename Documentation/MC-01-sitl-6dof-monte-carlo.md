@@ -137,12 +137,12 @@ Per motor, active, build tolerance (all 100 %):
 | FM1 | Roll instability at c = 70 | Ixx 3× lower than assumed, plus 20 ms of unmodelled delay | c = 15, 200 Hz synced (ADR-004) |
 | FM2 | Roll hang at 40–60 °/s | Trim band sized for c = 70; friction torque needs 1/q trim | Band 0.3, torque-space trim, dither |
 | FM3 | **Lock-in through the free fin can** | Can spin ≈ 1.13 × \|cant°\| × f_pitch, constant through the flight because both scale with V | **Build tolerance:** \|cant\| ≤ 0.25°, single fin ≤ 0.25° (`mc_lockin.png`) |
-| FM4 | Friction drag-along | Can spun by cant drags the body through the bearing (T/(k c) ≈ 290 °/s at 7.5 mN m) | Bearing ≤ 6 mN m (spin-down); V6 can-spin sensor for feedforward |
+| FM4 | Friction drag-along | Can spun by cant drags the body through the bearing (T/(k c) ≈ 290 °/s at 7.5 mN m) | Bearing ≤ 6 mN m (spin-down). A can-spin sensor for feedforward was considered for V6 and not adopted |
 | FM5 | Apogee 7 s late on high-thrust motors | One vibration-clipped frame latched NAV saturation | NAV clip budget (20 ms) |
 | FM6 | False LANDED under a calm canopy (10 s still) | Steady descent looks like ground | 30 s rule; impact-shock rule; t_min 15 s |
 | FM7 | Deployment shock latched "touchdown" | Motor-delay deployment after t_min | t_min 15 s |
-| FM8 | Passive flight 1 crosses resonance in 5 % of flights | The free forward body has very low roll damping | Recommend flight 1 = **damping only** (§7) |
-| FM9 | Hard-over: roll up to about 1 000 °/s | The P gain is too low to use the authority of the remaining canards | Boost 4× (p95 920 → 648). **Residual**: needs servo feedback (V6) |
+| FM8 | Passive flight 1 crosses resonance in 5 % of flights | The free forward body has very low roll damping | Flight 1 = **full rate law** (§7), which keeps the body furthest from resonance |
+| FM9 | Hard-over: roll up to about 1 000 °/s | The P gain is too low to use the authority of the remaining canards | Boost 4× (p95 920 → 648). **Residual hazard** (servo feedback not adopted for V6) |
 
 ## 6. Build and measurement requirements derived
 
