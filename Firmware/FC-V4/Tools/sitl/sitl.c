@@ -101,8 +101,11 @@ static void cfg_defaults(void)
     C.seed = 1; C.pad_hold = 6.0; C.t_max = 400.0; C.dt_asc = 2.5e-4; C.dt_desc = 1e-3;
     strcpy(C.motor, "motors/G79W.csv"); strcpy(C.aero, "aero.csv");
     /* mass properties (OpenRocket "62mm Canard Control V1.0.0", G79W loaded:
-     * 897.6 g, CG 46.07 cm, transverse I 0.0734). Dry = less the motor. */
-    C.m_dry = 0.7736; C.x_cg_dry = 0.4278; C.x_mot = 0.8273; C.It_dry = 0.0650;
+     * 897.6 g, CG 46.07 cm, transverse I 0.0734). Dry = less the motor.
+     * LD-01 §2: solved from the OpenRocket G79W export at ignition and burnout
+     * (loaded 897.6 g / CG 0.4607 / It 0.0734; burnout CG 0.4339). Earlier
+     * values 0.4278 / 0.8273 / 0.065 put the loaded CG 2.2 cm aft. */
+    C.m_dry = 0.7736; C.x_cg_dry = 0.4007; C.x_mot = 0.835; C.It_dry = 0.0530;
     C.Ixx_body = 2.2e-4; C.I_can = 2.6e-4; C.L_total = 0.886; C.d = 0.062;
     C.x_canard = 0.192; C.x_fin = 0.812; C.x_nose_cp = 0.0466; C.x_attach = 0.18;
     C.x_imu = 0.22; C.r_imu = 0.005;
@@ -338,6 +341,7 @@ typedef struct {
     double delta[4]; Servo sv[4]; double cmd[4];
     V3 wind_turb; double chute_open, swing_x, swing_y;
     double apogee, t_apogee, v_burn; double imp_g;
+    double dep_V, dep_gam, dep_h, dep_aoa, dep_w, v_desc;
 } Plant;
 static Plant P;
 
@@ -393,6 +397,99 @@ static double thrust(void)
 /* body position of a station relative to the CG */
 static V3 st(double x_station, double r_x, double r_y) { return v3(r_x, r_y, P.xcg - x_station); }
 
+
+/* ---------------------------------------------------------------- loads -- */
+/* LD-01: internal loads at body stations by the cut method. The forward part
+ * of the vehicle at a cut carries its external non-gravity forces F_i and its
+ * inertial reactions -m_j f_j, where f_j is the specific force at node j
+ * (f_cg + wdot x r + w x (w x r), gravity cancels). Their resultant is what
+ * the aft part must react: axial (compression +), shear, bending moment.
+ * The dry mass is lumped from the OpenRocket component tree and calibrated
+ * to OpenRocket's m, CG and It; the motor is 4 nodes over its length. */
+#define NLD 6
+static const double LD_X[NLD] = { 0.100, 0.180, 0.260, 0.320, 0.510, 0.760 };
+static const char *const LD_NAME[NLD] = { "nose_joint", "avbay_canard", "canard_body", "coupler_aft", "body_mid", "body_fincan" };
+#define NNODE 40
+static int n_node; static double nd_x[NNODE], nd_m0[NNODE];
+#define NFRC 32
+static int n_frc; static double fr_x[NFRC]; static V3 fr_F[NFRC];
+typedef struct { double Mb, P, Pt, S, Neq; } LdMax;
+static LdMax LDM[NLD]; static double ld_resid_max, ld_lump_It;
+static void frc(double x, V3 Fb) { if (n_frc < NFRC) { fr_x[n_frc] = x; fr_F[n_frc] = Fb; n_frc++; } }
+static void node(double x, double m) { if (n_node < NNODE) { nd_x[n_node] = x; nd_m0[n_node] = m; n_node++; } }
+static void tube(double x0, double x1, double m) { for (int i = 0; i < 4; i++) { node(x0 + ((x1 - x0) * (i + 0.5) / 4.0), m / 4.0); } }
+static void loads_init(void)
+{
+    n_node = 0;
+    /* OpenRocket component tree (rocket.ork), x from the nose tip */
+    node(0.067, 0.015); node(0.0565, 0.030);                       /* nose shell, nose mass        */
+    tube(0.10, 0.18, 0.040); node(0.14, 0.100);                    /* avionics bay, flight computer */
+    tube(0.18, 0.26, 0.060); node(0.22, 0.050); node(0.21, 0.012); /* canard module, servos, canards */
+    tube(0.24, 0.32, 0.090); node(0.3185, 0.008); node(0.28, 0.020); node(0.3335, 0.010); /* coupler */
+    tube(0.26, 0.76, 0.141); node(0.51, 0.025); node(0.67, 0.004); /* body tube, chute, cord        */
+    tube(0.76, 0.886, 0.010); tube(0.716, 0.886, 0.100);           /* fin can, engine block         */
+    node(0.871, 0.003); node(0.854, 0.0075); node(0.769, 0.0075); node(0.85, 0.006); node(0.79, 0.005);
+    /* calibrate: the OpenRocket total is 29.6 g heavier than the tree's
+     * listed overrides (glue, fasteners, wiring); place it to hit the CG,
+     * then scale and shift to the dispersed m and CG */
+    double m = 0, mx = 0; for (int i = 0; i < n_node; i++) { m += nd_m0[i]; mx += nd_m0[i] * nd_x[i]; }
+    if (C.m_dry > m) { node(((C.m_dry * C.x_cg_dry) - mx) / (C.m_dry - m), C.m_dry - m); }   /* nominal calibration */
+    const double mt = C.m_dry * C.mass_scale, xt = C.x_cg_dry + C.cg_shift;
+    m = 0; mx = 0; for (int i = 0; i < n_node; i++) { m += nd_m0[i]; mx += nd_m0[i] * nd_x[i]; }
+    const double k = mt / m, dx = xt - (mx / m);
+    ld_lump_It = 0;
+    for (int i = 0; i < n_node; i++) { nd_m0[i] *= k; nd_x[i] += dx; ld_lump_It += nd_m0[i] * pow(nd_x[i] - xt, 2); }
+    memset(LDM, 0, sizeof LDM); ld_resid_max = 0;
+}
+static void loads_eval(V3 Fsum, V3 wdot)
+{
+    double mm = MO.m[0]; if (P.ignited) { mm = interp(MO.t, MO.m, MO.n, P.t - P.t_ign); }
+    const V3 fcg = scl(Fsum, 1.0 / P.m);
+    const double xm0 = C.x_mot - 0.06, xm1 = C.L_total;
+    /* the lumped It differs from the dynamics' (dispersed) It by a few %: scale
+     * the rotational inertial term so that the cut aft of everything closes */
+    double It_l = 0;
+    for (int j = 0; j < n_node + 4; j++) {
+        const double xj = (j < n_node) ? nd_x[j] : xm0 + ((xm1 - xm0) * ((j - n_node) + 0.5) / 4.0);
+        It_l += ((j < n_node) ? nd_m0[j] : mm / 4.0) * pow(xj - P.xcg, 2);
+    }
+    const V3 wd = scl(wdot, P.It / fmax(It_l, 1e-6));
+    double Pv[NLD + 1]; V3 Sv[NLD + 1], Mv[NLD + 1];
+    for (int s = 0; s <= NLD; s++) {
+        const double xs = (s < NLD) ? LD_X[s] : 10.0;
+        const V3 rs = st(xs, 0, 0);
+        V3 Fc = v3(0, 0, 0), Mc = v3(0, 0, 0);
+        for (int i = 0; i < n_frc; i++) {
+            if (fr_x[i] < xs) { Fc = add(Fc, fr_F[i]); Mc = add(Mc, crs(sub(st(fr_x[i], 0, 0), rs), fr_F[i])); }
+        }
+        for (int j = 0; j < n_node + 4; j++) {
+            const double xj = (j < n_node) ? nd_x[j] : xm0 + ((xm1 - xm0) * ((j - n_node) + 0.5) / 4.0);
+            const double mj = (j < n_node) ? nd_m0[j] : mm / 4.0;
+            if (xj >= xs) { continue; }
+            const V3 r = st(xj, 0, 0);
+            const V3 fj = add(fcg, add(crs(wd, r), crs(P.w, crs(P.w, r))));
+            const V3 Fi = scl(fj, -mj);
+            Fc = add(Fc, Fi); Mc = add(Mc, crs(sub(r, rs), Fi));
+        }
+        Pv[s] = -Fc.z; Sv[s] = v3(Fc.x, Fc.y, 0); Mv[s] = v3(Mc.x, Mc.y, 0);
+    }
+    /* closure: a cut aft of everything must carry nothing */
+    const double res = nrm(Mv[NLD]) / fmax(1e-3, P.m * G0 * C.L_total);
+    if (res > ld_resid_max) { ld_resid_max = res;
+        if (getenv("LD_DEBUG")) { fprintf(stderr, "t=%.3f res=%.3f V=%.1f wdot=(%.1f %.1f) w=(%.2f %.2f %.1f) pc=%.1f It=%.4f lump=%.4f M=(%.3f %.3f) F=(%.2f %.2f %.2f)\n",
+            P.t - P.t_ign, res, P.V, wdot.x, wdot.y, P.w.x, P.w.y, P.w.z, P.pc, P.It, ld_lump_It, Mv[NLD].x, Mv[NLD].y, Fsum.x, Fsum.y, Fsum.z); } }
+    const double R = 0.5 * C.d;
+    for (int s = 0; s < NLD; s++) {
+        const double Mb = nrm(Mv[s]), Pc = Pv[s], S = nrm(Sv[s]);
+        if (Mb > LDM[s].Mb) { LDM[s].Mb = Mb; }
+        if (Pc > LDM[s].P) { LDM[s].P = Pc; }
+        if (-Pc > LDM[s].Pt) { LDM[s].Pt = -Pc; }
+        if (S > LDM[s].S) { LDM[s].S = S; }
+        const double Ne = fmax(Pc, 0.0) + (2.0 * Mb / R);       /* equivalent axial compression */
+        if (Ne > LDM[s].Neq) { LDM[s].Neq = Ne; }
+    }
+}
+
 static void plant_step(double dt)
 {
     if (P.ignited) { P.t += dt; } else { P.t += dt; }
@@ -406,20 +503,25 @@ static void plant_step(double dt)
     const double A = M_PI * C.d * C.d * 0.25;
     V3 F = v3(0, 0, 0), M = v3(0, 0, 0);
     double L_can = 0.0;                                         /* aero roll torque on the can */
+    n_frc = 0;
 
     /* thrust (with misalignment) at the nozzle */
     const double T = thrust();
     if (T > 0) {
         const double e = C.thrust_mis_deg * D2R, az = C.thrust_az_deg * D2R;
         const V3 Fb = scl(v3(sin(e) * cos(az), sin(e) * sin(az), cos(e)), T);
-        F = add(F, Fb); M = add(M, crs(st(C.L_total, 0, C.cg_off_y), Fb));
+        F = add(F, Fb); M = add(M, crs(st(C.L_total, 0, C.cg_off_y), Fb)); frc(C.L_total, Fb);
     }
     const int aero_on = (V > 1.0) && !P.landed;
     P.alpha = 0;
     if (aero_on) {
         const double q = P.qbar;
         const double Cd = C.Cd_scale * interp(AE.M, AE.Cd, AE.n, P.mach);
-        F = add(F, scl(vb, -q * A * Cd / V));                    /* drag along the air velocity */
+        const V3 Fdrag = scl(vb, -q * A * Cd / V);
+        F = add(F, Fdrag);                                       /* drag along the air velocity */
+        /* LD-01 A-L1: forebody 40 % at the nose, skin 30 % along the body, base 30 % */
+        frc(0.05, scl(Fdrag, 0.4)); frc(C.L_total, scl(Fdrag, 0.3));
+        for (int k = 0; k < 5; k++) { frc(0.15 + (0.15 * k), scl(Fdrag, 0.06)); }
         const V3 vlat = v3(vb.x, vb.y, 0.0);
         P.alpha = atan2(nrm(vlat), fmax(vb.z, 1e-6));
         /* body normal force (nose + rear fins + body), canards separately */
@@ -432,13 +534,17 @@ static void plant_step(double dt)
         const V3 dir = (nrm(vlat) > 1e-9) ? scl(vlat, 1.0 / nrm(vlat)) : v3(0, 0, 0);
         const V3 Fn = scl(dir, -q * A * CNa_b * sa);
         F = add(F, Fn); M = add(M, crs(st(xcp_b, 0, 0), Fn));
+        {   /* split between nose and fins with the same total and moment */
+            const double kf = (xcp_b - C.x_nose_cp) / (C.x_fin - C.x_nose_cp);
+            frc(C.x_nose_cp, scl(Fn, 1.0 - kf)); frc(C.x_fin, scl(Fn, kf));
+        }
         /* pitch damping: nose and rear fins see alpha_local = w x r */
         const double xs[2] = { C.x_nose_cp, C.x_fin }, cn[2] = { C.CNa_nose, C.CNa_fins };
         for (int i = 0; i < 2; i++) {
             const V3 r = st(xs[i], 0, 0);
             const V3 ul = crs(P.w, r); const V3 ulat = v3(ul.x, ul.y, 0);
             const V3 Fd = scl(ulat, -q * A * C.CNa_scale * cn[i] / V);
-            F = add(F, Fd); M = add(M, crs(r, Fd));
+            F = add(F, Fd); M = add(M, crs(r, Fd)); frc(xs[i], Fd);
         }
         /* skin-friction roll damping on the forward body */
         M.z += -q * A * C.d * 2.0 * C.Cf * (C.L_body / C.d) * (P.w.z * C.d / (2.0 * V));
@@ -454,14 +560,14 @@ static void plant_step(double dt)
             const double ast = C.alpha_stall * D2R;
             al = fmax(fmin(al, ast), -ast);
             const V3 Fi = scl(tv, q * C.kf_can * C.Cld_scale * al);
-            F = add(F, Fi); M = add(M, crs(r, Fi));
+            F = add(F, Fi); M = add(M, crs(r, Fi)); frc(C.x_canard, Fi);
         }
         /* rear fin can: net cant spins it, one misaligned fin rotates a side force */
         L_can = q * A * C.d * ((C.Cld_f * C.can_cant_deg * D2R) + (C.Clp_f * C.Clp_scale * P.pc * C.d / (2.0 * V)));
         if (C.fin1_mis_deg != 0.0) {
             const V3 tv = v3(-sin(P.phic), cos(P.phic), 0.0);
             const V3 Fs = scl(tv, q * C.kff_fin * C.fin1_mis_deg * D2R);
-            F = add(F, Fs); M = add(M, crs(st(C.x_fin, 0, 0), Fs));
+            F = add(F, Fs); M = add(M, crs(st(C.x_fin, 0, 0), Fs)); frc(C.x_fin, Fs);
             L_can += q * C.kff_fin * C.fin1_mis_deg * D2R * (C.d * 0.5 + 0.027);
         }
     }
@@ -512,6 +618,7 @@ static void plant_step(double dt)
         const V3 H = v3(I.x * P.w.x, I.y * P.w.y, (I.z * P.w.z) + (C.I_can * P.pc));
         const V3 gyro = crs(P.w, H);
         wdot = v3((M.x - gyro.x) / I.x, (M.y - gyro.y) / I.y, (M.z - gyro.z) / I.z);
+        if (P.ignited && !P.chute) { loads_eval(F, wdot); }
     }
     /* ground */
     if (P.ignited && !P.on_rail && (P.p.z < 0.0) && (P.t - P.t_ign > 2.0)) {
@@ -546,8 +653,17 @@ static void plant_step(double dt)
     /* events */
     if (P.ignited) {
         if (P.p.z > P.apogee) { P.apogee = P.p.z; P.t_apogee = P.t - P.t_ign; }
+        if (P.chute && (P.p.z < 20.0) && (P.p.z > 10.0)) { P.v_desc = -P.v.z; }
         if (!P.chute && (P.t_apogee > 0) && (P.v.z < 0) && (P.t - P.t_ign > P.t_apogee + C.chute_delay)) {
             P.chute = 1; P.t_chute = P.t;
+            {   /* deployment state for the REC-01 recovery sub-sim */
+                double rho_d, a_d; isa(C.site_elev + P.p.z, &rho_d, &a_d); (void)rho_d; (void)a_d;
+                const V3 va = sub(P.v, wind);
+                P.dep_V = nrm(va); P.dep_gam = atan2(va.z, sqrt((va.x * va.x) + (va.y * va.y))) * R2D;
+                P.dep_h = P.p.z; P.dep_w = sqrt((P.w.x * P.w.x) + (P.w.y * P.w.y)) * R2D;
+                const V3 ax = qrot(P.q, v3(0, 0, 1));
+                P.dep_aoa = acos(fmax(-1.0, fmin(1.0, dot(ax, va) / fmax(P.dep_V, 1e-6)))) * R2D;
+            }
         }
     }
 }
@@ -595,7 +711,7 @@ int main(int argc, char **argv)
     }
     imu_init();
     for (int i = 0; i < 4; i++) { servo_init(&P.sv[i], C.dt_asc); }
-    mass_props();
+    mass_props(); loads_init();
 
     static const NavCfg NC = {
         .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .sat_budget_n = NAV_SAT_BUDGET_N, .still_acc_mps2 = NAV_STILL_ACC_MPS2,
@@ -752,5 +868,12 @@ int main(int argc, char **argv)
            wlat_max, wl_coast_max, aoa_max, qalpha_max, nlat_max, defl_max, (act_n > 0) ? sat_n / act_n : 0,
            (n_q > 0) ? sqrt(qhat_e2 / n_q) : 0, qhat_emax, h_err_apo, pcan_max, ratio_max, P.imp_g, trim_last,
            t_ready >= 0, Phase_Index(Flight_Phase(&F)), body_ratio_max);
+    printf("ld_resid=%.4f ld_lump_It=%.4f dep_V=%.2f dep_gam=%.1f dep_h=%.1f dep_aoa=%.1f dep_w=%.1f v_desc=%.2f", ld_resid_max, ld_lump_It,
+           P.dep_V, P.dep_gam, P.dep_h, P.dep_aoa, P.dep_w, P.v_desc);
+    for (int s = 0; s < NLD; s++) {
+        printf(" ldM_%s=%.3f ldP_%s=%.2f ldT_%s=%.2f ldS_%s=%.2f ldN_%s=%.1f", LD_NAME[s], LDM[s].Mb, LD_NAME[s], LDM[s].P,
+               LD_NAME[s], LDM[s].Pt, LD_NAME[s], LDM[s].S, LD_NAME[s], LDM[s].Neq);
+    }
+    printf("\n");
     return 0;
 }

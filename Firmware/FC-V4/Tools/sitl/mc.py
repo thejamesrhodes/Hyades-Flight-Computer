@@ -147,6 +147,10 @@ def main():
         v = np.array([r[k] for r in rows], float)
         summ["pct"][k] = {"p50": round(float(np.percentile(v, 50)), 3), "p95": round(float(np.percentile(v, 95)), 3),
                           "p99": round(float(np.percentile(v, 99)), 3), "max": round(float(v.max()), 3)}
+    for k in sorted(k for k in rows[0] if k.startswith("ld")):
+        v = np.array([r[k] for r in rows], float)
+        summ.setdefault("loads", {})[k] = {"p50": round(float(np.percentile(v, 50)), 3), "p95": round(float(np.percentile(v, 95)), 3),
+                                           "p99": round(float(np.percentile(v, 99)), 3), "max": round(float(v.max()), 3)}
     for m in a.motors.split(","):
         rr = [r for r in rows if r["motor"].endswith(f"/{m}.csv")]
         cc = [judge(r, a.shadow) for r in rr]
