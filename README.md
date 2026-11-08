@@ -132,7 +132,7 @@ On this version, the MCU boots and runs, USB and PDB works completely. An incorr
 <img src="Documentation/Images/Avionics_Boards.jpg" width="450" alt="Bare boards">
 </p>
 
-After some more testing, I have realised that the supposed ICM-42688-P's are actually QMI8658A gyroscopes, seemingly substituted as a fake version of the target gyros (cross referenced address of 0x6B), after rewriting some of the code I got them working, allowing for a breakout board/bodge to be avoided. After collecting 2+ hours of data running at 16 g, 2048 dps, 224.2~ Hz ODR over I2C at 400kHz, I computed allan variance and then fitted GMWM + WN + RW + Quantisation to it.
+After some more testing, I have realised that the supposed ICM-42688-P's are actually QMI8658A IMU, substituted as a fake version of the target gyros (cross referenced WHO_AM_I 0x05, rev 0x7C, address 0x6B), after rewriting some of the code I got them working, allowing for a breakout board/bodge to be avoided. After collecting 2+ hours of data running at 16 g, 2048 dps, 224.2~ Hz ODR over I2C at 400kHz, I computed allan variance and then fitted a white-noise + Gauss-Markov + random-walk model to it (GMWM) with the rate-quantisation component computed separately under PQN model assumptions.
 
 <img src="Firmware/FC-V4/Docs/noise/20261103-201033_gyro_adev.png" width="900" alt="QMI8658A gyro overlapping Allan deviation, x/y/z, 2.46 h static capture, with WN+GM+RW fit and rate-quantisation share">
 
