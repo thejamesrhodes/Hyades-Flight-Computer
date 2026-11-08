@@ -228,7 +228,7 @@ The drop test (LD-01 T7) settles whether 8 m/s is acceptable for the printed fin
 3. **Landing detection is unaffected.**
    - Deployment and snatch occur within about 1 s of ejection, which is at most about 3 s after apogee, well inside `DET_T_LAND_MIN_S` = 15 s.
    - The overrun snatch, about 0.75 s after ejection, is also inside it (ADR-004 §5).
-4. **Motor delay choice:** the shortest delay that lands deployment within −1 to +3 s of the predicted apogee time for the chosen motor (MC-01 table). The cord loads are insensitive to speed, but the pressure and separation are not.
+4. **Motor delay choice:** the shortest delay that lands deployment within −1 to +3 s of the predicted apogee time for the chosen motor (MC-01 table). Ejection pressure and separation do not depend on flight speed. With the recommended cord, peak tension rises about 15 % for a 25–40 m/s deployment (§5.5), and a late deployment costs altitude and adds drift.
 5. **FC mounting:** it must take the recovery shock. That is 37 g with the recommended cord, against 156 g as built: check the FC tray and the battery retention.
 
 ## 8. What to measure, in order
