@@ -184,7 +184,7 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights, and in 3 840 of 3 840
 | MATLAB cross-check | Matches the Python port (§3.1). |
 | SITL vs OpenRocket | G79W apogee 432.7 m vs 439 m (3 m/s wind, 3° rail tilt in SITL); t_apogee 9.59 vs 9.66 s. After the LD-01 CG correction: 431.8 m. I205W 1 291.6 vs 1 303 m. |
 | SITL Monte Carlo | Final build including dither, build tolerances met: **1 200 / 1 200 flights pass R1–R9**. Coast roll RMS p95 22 °/s; peak p95 112 °/s. Full campaign set in MC-01. Re-run with corrected mass properties (LD-01 §3): 1 198 / 1 200. |
-| Hardware HITL, 8 Nov | Pre-dither build: 9 / 9 cases OK (nominal, wind 9 m/s + gust, vibration nominal and worst, 25 ms boost dropout, NaN sample, no GPS, pad knock, I205W). **Final build with dither** (`campaign-20261108-103621`): 4 / 4 OK. G79W nominal roll peak 95 °/s (was 105), RMS 29 °/s (was 32), canards ≤ 1.15°, q̂ error 0.9 % RMS, loop p99 329 µs. |
+| Hardware HITL, 8 Nov | Pre-dither build: 9 / 9 cases with the correct phase sequence (nominal, wind 9 m/s + gust, vibration nominal and worst, 25 ms boost dropout, NaN sample, no GPS, pad knock, I205W). **The I205W case limit-cycled in roll at about ±450 °/s** (IMU clipping corrupts q̂; FIG-01 F1). It is outside the ≤ 14 g shortlist and is not a flight case. **Final build with dither** (`campaign-20261108-103621`): 4 / 4 OK. G79W nominal roll peak 95 °/s (was 105), RMS 29 °/s (was 32), canards ≤ 1.15°, q̂ error 0.9 % RMS, loop p99 329 µs. |
 
 ## 9. Consequences for hardware (V6 / H743 and the airframe)
 

@@ -70,7 +70,7 @@ def link(pa, pb, va, vb, L0, EA, zeta, mu):
     return T, u, dist
 
 
-def simulate(s, t_end=4.0, dt=2.5e-5, rho=1.2, dt1=1e-6, trace=None):
+def simulate(s, t_end=4.0, dt=2.5e-5, rho=1.2, dt1=1e-6, trace=None, rec=None):
     n = len(s["V0"])
     e = np.vstack([np.cos(s["gam0"] + s["aoa0"]), np.sin(s["gam0"] + s["aoa0"])])   # body forward axis
     v = np.vstack([s["V0"] * np.cos(s["gam0"]), s["V0"] * np.sin(s["gam0"])])
@@ -93,6 +93,8 @@ def simulate(s, t_end=4.0, dt=2.5e-5, rho=1.2, dt1=1e-6, trace=None):
         newly = (~out) & (sx >= s["L_eng"])
         t_sep = np.where(newly, t, t_sep); v_sep = np.where(newly, sv, v_sep); Pout = np.where(newly, Pg, Pout)
         out |= newly
+        if rec is not None and int(round(t[0] / dt1)) % 50 == 0:
+            rec.setdefault("t1", []).append(float(t[0])); rec.setdefault("P", []).append(Pg.copy()); rec.setdefault("s", []).append(sx.copy())
         t += dt1
     fail_sep = ~out
     v_sep = np.where(out, v_sep, sv)
@@ -125,6 +127,11 @@ def simulate(s, t_end=4.0, dt=2.5e-5, rho=1.2, dt1=1e-6, trace=None):
         fK = -T1 * u1 + T2 * u2 + T3 * u3
         fC = drag(vC, cdsC) - T3 * u3
         aF = fF / s["mF"]; aA = fA / s["mA"]
+        if rec is not None and int(round(t2 / dt)) % 40 == 0:
+            for k, v in (("t2", t2), ("d", np.sqrt(((pF - pA) ** 2).sum(0))), ("T1", T1), ("T2", T2), ("T3", T3),
+                         ("gF", np.sqrt((aF ** 2).sum(0)) / G0), ("gA", np.sqrt((aA ** 2).sum(0)) / G0), ("cds", cdsC),
+                         ("vF", np.sqrt((vF ** 2).sum(0))), ("vA", np.sqrt((vA ** 2).sum(0)))):
+                rec.setdefault(k, []).append(v if np.isscalar(v) else v.copy())
         gF = np.maximum(gF, np.sqrt((aF ** 2).sum(0)) / G0); gA = np.maximum(gA, np.sqrt((aA ** 2).sum(0)) / G0)
         vF = vF + (aF + g) * dt; vA = vA + (aA + g) * dt
         vK = vK + (fK / s["mK"] + g) * dt; vC = vC + (fC / s["mC"] + g) * dt

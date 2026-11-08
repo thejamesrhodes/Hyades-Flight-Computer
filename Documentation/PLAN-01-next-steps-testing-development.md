@@ -48,6 +48,8 @@ G1–G4 need no motor. G5, G8 and G9 need the airframe assembled.
 | S5 | Pad-knock false liftoff (≥ 10 g / 200 ms): evaluate a longer thrust-signature requirement against the liftoff latency budget (R2 ≤ 0.35 s; the pre-trigger ring covers 2.56 s) | Known limit; T4 cannot tell a big knock from a launch | STM-01 §4 |
 | S6 | Recovery hardware per D2: cord, quick link and shroud attachments rated ≥ 420 N; FC tray and battery retention for 37 g (or 156 g with Kevlar) | REC-01 §5.5, §7 | |
 | S7 | **V6 schematic review against BP-01 §5:** ±200 g accelerometer; raw IMU at ≥ 1 kHz to SD through apogee + 5 s; synchronous servo timers; backup-SRAM ring index; servo rail ADC | Adopted V6 requirements | BP-01 §5, REC-01 §7 |
+| S9 | **NAV saturation vs the roll schedule:** with a > 16 g motor the IMU clips, q̂ is about 80 % wrong, and roll reaches 400–1 600 °/s (SITL and HITL I205W). Root-cause it: fallback gain vs corrupted q̂. Add a pre-flight check that motor thrust / mass ≤ 14 g. V6's ±200 g accelerometer is the hardware fix. | Outside the shortlist, but nothing in the firmware prevents it | FIG-01 F1 |
+| S10 | Post-apogee roll (fins OFF, before deployment) reaches about 200 °/s in the active tail and about 400 °/s with wide tolerance. Decide whether it needs a requirement (cord twist, camera), or whether rate damping should continue at low q until deployment | Not covered by R5 | FIG-01 §3 |
 | S8 | Later upgrades, after G1–G2: friction disturbance observer (DOB/ESO) in place of the trim integrator; SPRT detectors; INDI for the 3-axis H743 work | Dominant residual is bearing friction | BP-01 §2 |
 
 ## 4. Flight-1 readiness gates
