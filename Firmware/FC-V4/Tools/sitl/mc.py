@@ -81,7 +81,8 @@ def run_one(job):
     return out
 
 
-# MC-01 §3 requirement set (proposed; to be confirmed by James)
+# MC-01 §3 requirement set (James 8 Nov: tightened to the verified design;
+# statistical goals p95 peak <= 120 dps, p95 coast RMS <= 25 dps reported separately)
 def judge(r, shadow):
     lift = r["det_liftoff"]; apo = r["det_apogee"] - r["t_apogee"]
     land = r["det_landed"] - r["t_ground"] if r["t_ground"] > 0 else 99
@@ -93,13 +94,13 @@ def judge(r, shadow):
         "R3_apogee_-0.5_+1.5s": -0.5 <= apo <= 1.5,
         "R4a_landing_never_early": land >= 0,
         "R4b_landing_latency": (land <= (15 if gps else 40)) or (land_rest <= (5 if gps else 35)),
-        "R6_lockin_ratio_le_0.7": r["can_pitch_ratio"] <= 0.7 and r["body_pitch_ratio"] <= 0.7,
+        "R6_lockin_ratio_le_0.6": r["can_pitch_ratio"] <= 0.6 and r["body_pitch_ratio"] <= 0.6,
         "R9_qhat_rms_le_25pct": r["qhat_rms"] <= 25,
     }
     if not shadow:
         checks.update({
-            "R5a_roll_max_le_360dps": max(r["p_max_boost"], r["p_max_coast"]) <= 360,
-            "R5b_coast_rms_le_60dps": r["p_rms_coast"] <= 60,
+            "R5a_roll_max_le_240dps": max(r["p_max_boost"], r["p_max_coast"]) <= 240,
+            "R5b_coast_rms_le_45dps": r["p_rms_coast"] <= 45,
             "R8_sat_le_5pct": r["sat_frac"] <= 0.05,
         })
     return checks

@@ -184,7 +184,7 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
 | MATLAB cross-check | Matches the Python port (§3.1). |
 | SITL vs OpenRocket | G79W apogee 432.7 m vs 439 m (3 m/s wind, 3° rail tilt in SITL); t_apogee 9.59 vs 9.66 s. I205W 1 291.6 vs 1 303 m. |
 | SITL Monte Carlo | Final build including dither, build tolerances met: **1 200 / 1 200 flights pass R1–R9**. Coast roll RMS p95 22 °/s; peak p95 112 °/s. Full campaign set in MC-01. |
-| Hardware HITL, 8 Nov | Pre-dither build: 9 / 9 cases OK (nominal, wind 9 m/s + gust, vibration nominal and worst, 25 ms boost dropout, NaN sample, no GPS, pad knock, I205W). **Final build with dither** (`campaign-20261108-103621`): 4 / 4 OK. G79W nominal roll peak 95 °/s (was 105), RMS 29 °/s (was 32), canards ≤ 1.15°, q̂ error 0.9 % RMS, loop p99 329 µs. |
+| Hardware HITL, 8 Nov, final build | 9 / 9 cases OK: nominal, wind 9 m/s + gust, vibration nominal and worst, 25 ms boost dropout, NaN sample, no GPS, pad knock, I205W. G79W nominal: roll peak 105 °/s, RMS 32 °/s, canards ≤ 1.1°, q̂ error 0.9 % RMS. |
 
 ## 9. Consequences for hardware (V6 / H743 and the airframe)
 
@@ -205,5 +205,9 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
 ## 10. Open items
 
 - Re-run `optimise_roll_schedule`, `montecarlo_roll_control` and Simulink with c = 15 and the torque-space trim, so the MATLAB suite matches the flight code.
-- James's decision on the flight 1 mode (MC-01 §7: passive vs damping only).
+- Hardware HITL re-run of the dither build (built clean; waiting for COM8).
+- ~~Flight 1 mode~~: **decided 8 Nov: full rate law** (zero-rate target, no angle hold; `CFG_CTRL_SHADOW 0`).
+- Requirements tightened (MC-01 §3): peak ≤ 240 °/s, coast RMS ≤ 45 °/s, lock-in ≤ 0.6. The flight configuration passes 1 200 / 1 200.
+- V6: ≥ 1 kHz IMU to SD and a high-g accelerometer adopted (BP-01 §5).
+- Phase 2 (agreed): 6DOF structural loads, and recovery for motor ejection with a single chute.
 - Set `DET_T_APOGEE_MAX_S` on the pre-flight sheet once the motor is chosen.

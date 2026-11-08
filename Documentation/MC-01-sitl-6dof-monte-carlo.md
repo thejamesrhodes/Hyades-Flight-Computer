@@ -84,7 +84,7 @@ Status codes:
 | A25 | Recovery | 0.6 m chute | delay U(0.5, 3) s; swing U(3, 12)°; collapse U(2, 30) s | A | OpenRocket .ork; Phase 2 recovery sim. |
 | A26 | Site elevation | 110 m | — | A | MRC survey or GPS on the day. The density effect is about 1 % per 100 m. |
 
-## 3. Requirements (proposed; James to confirm)
+## 3. Requirements (confirmed by James on 8 Nov; roll and lock-in tightened to the verified design)
 
 | ID | Requirement | Rationale |
 |---|---|---|
@@ -93,9 +93,10 @@ Status codes:
 | R3 | Apogee detected within −0.5 / +1.5 s of truth | Recovery timing (Phase 2) |
 | R4a | LANDED **never** before touchdown | Data and beacon safety |
 | R4b | LANDED ≤ 15 s after touchdown (≤ 40 s with no GPS), or ≤ 5 s (≤ 35 s) after coming to rest | Operations |
-| R5a | \|p\| ≤ 360 °/s (1 rev/s) at all times in active flight | Lock-in margin and camera use |
-| R5b | Coast roll-rate RMS ≤ 60 °/s | Roll-control demonstration goal |
-| R6 | Max \|body roll\| / ω_pitch ≤ 0.7, and max \|can spin\| / ω_pitch ≤ 0.7 | Lock-in: stay at least 30 % below pitch resonance |
+| R5a | \|p\| ≤ **240 °/s** at all times in active flight (was 360) | Tightened to the verified maximum (222 °/s) plus margin |
+| R5b | Coast roll-rate RMS ≤ **45 °/s** (was 60) | Verified maximum 43.7 °/s |
+| R6 | Max \|body roll\| / ω_pitch ≤ **0.6**, and max \|can spin\| / ω_pitch ≤ **0.6** (was 0.7) | Lock-in margin; verified maxima 0.45 / 0.58 |
+| G1, G2 | **Statistical goals:** p95 peak \|p\| ≤ 120 °/s; p95 coast RMS ≤ 25 °/s | Verified 112 / 22 °/s |
 | R8 | Canard command saturated ≤ 5 % of the time | Authority margin |
 | R9 | q̂ RMS error ≤ 25 % | Inside the ±30 % gain uncertainty the loop was designed for |
 
@@ -107,8 +108,8 @@ Wind is U(0, 8) m/s unless stated. "Build tolerance" means A10–A12 at the buil
 
 | Campaign | n | All-pass | Notes |
 |---|---|---|---|
-| **Active, build tolerance, 6 motors** | 1 200 | **100 %** | Roll peak p95 112 °/s (max 222); coast RMS p95 22 °/s (max 44); canard max p95 2.8°; AoA (q > 500 Pa) p95 11°; q·α p95 12.7 kPa·°; lateral load p95 0.58 g; q_max p95 8.3 kPa |
-| Active, wide tolerance | 1 200 | 96.8 % | R6 96.8 %, R5b 99.6 %: every failure traces to cant > 0.6° or friction > 8 mN m |
+| **Active, build tolerance, 6 motors** | 1 200 | **100 % (tightened R5/R6 too; G1 and G2 met)** | Roll peak p95 112 °/s (max 222); coast RMS p95 22 °/s (max 44); canard max p95 2.8°; AoA (q > 500 Pa) p95 11°; q·α p95 12.7 kPa·°; lateral load p95 0.58 g; q_max p95 8.3 kPa |
+| Active, wide tolerance | 1 200 | 92.5 % (tightened) | R6 93.8 %, R5a 98.5 %, R5b 98.7 %: failures trace to cant > 0.5° or friction > 8 mN m, so the build tolerance is mandatory |
 | Active, wind 0–12 m/s | 600 | 98.5 % | R9 98.5 % (q̂ uses ground speed; wind error); roll unaffected |
 | Flight-1 **shadow** (canards held at 0) | 600 | 94.7 % | Body roll p95 760 °/s, max 1 930 °/s. **5.3 % cross pitch resonance** (ratio max 1.7) |
 | Flight-1 **damping only** (trim off) | 600 | 68.3 % | R5b only (coast RMS p95 124 °/s). **Lock-in ratio max 0.50**, canards ≤ 2° |
@@ -151,13 +152,15 @@ Per motor, active, build tolerance (all 100 %):
 4. Measure Ixx and I_t (trifilar and bifilar), and servo τ_d, f_N, dead band (laser bench). Then re-run MC-01 with the measured values and consider c = 18–20.
 5. Set `DET_T_APOGEE_MAX_S` from the table above for the chosen motor.
 
-## 7. Flight 1 mode (decision for James)
+## 7. Flight 1 mode: **decided (James, 8 Nov): full rate law, zero-rate target, no angle hold**
+
+The options weighed:
 
 | Option | Lock-in (ratio max) | Roll | Risk |
 |---|---|---|---|
 | Shadow (canards locked at 0) | **1.7, 5.3 % of flights > 0.7** | p95 760 °/s | Passes through pitch resonance |
 | **Damping only** (trim off, dither on) | **0.50** | Coast RMS p95 124 °/s | Minimal authority (≤ 2°); verifies the actuation path |
-| Full law | 0.45 | Coast RMS p95 22 °/s | Most capability on a first flight |
+| **Full law (chosen)** | 0.45 | Coast RMS p95 22 °/s | Most capability on a first flight. It is also the option that keeps the forward body furthest from resonance. |
 
 ## 8. How to run
 
