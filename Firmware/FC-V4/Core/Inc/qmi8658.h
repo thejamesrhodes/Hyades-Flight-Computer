@@ -16,7 +16,7 @@
  *   lost (~700 of ~890 frames/s delivered, no overflow flag), for ~2.5 ms of
  *   blocking I2C per 10 ms frame.
  *
- * DESIGN: the sensor runs at QMI_ODR_224HZ with its LPF at 13.37 % ODR
+ * DESIGN: the sensor runs at QMI_ODR_448HZ (ADR-004) with its LPF at 13.37 % ODR
  * (~30 Hz) acting as the anti-alias filter for a 100 Hz control frame. Each
  * frame the host reads the newest coherent sample from the data registers:
  * one 17-byte burst (0x30 TIMESTAMP .. 0x40 GZ_H), then a 3-byte TIMESTAMP

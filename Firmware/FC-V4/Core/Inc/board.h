@@ -60,11 +60,17 @@
 /* ----------------------------------------------------------------------------
  * 3. TIMING / CYCLIC EXECUTIVE
  *
- * Single 100 Hz minor frame paced by TIM5 (32-bit, 1 MHz free-running).
- * Sensor ODRs are matched/oversampled to the frame so a fresh, BDU-protected
- * sample is available each frame. Sub-rates are counter-gated off the frame.
+ * Single 200 Hz minor frame paced by TIM5 (32-bit, 1 MHz free-running), ADR-004.
+ * Raised from 100 Hz (7 Nov): the loop delay budget (ADR-004 §2) is set by
+ * frame ZOH + servo PWM resampling + IMU filter; at 100 Hz frame / 50 Hz PWM it
+ * cost ~20 ms beyond the servo and left the roll loop with 11 deg of phase
+ * margin. The IMU runs at 448 Hz ODR so a sample <= 2.2 ms old is read each frame.
+ * Sub-rates are counter-gated off the frame. EVERY persistence count below is
+ * written in milliseconds and converted with MS_TO_FRAMES, so changing
+ * FRAME_HZ does not silently change a detection window.
  * -------------------------------------------------------------------------- */
-#define FRAME_HZ              100u
+#define FRAME_HZ              200u
+#define MS_TO_FRAMES(ms)      ((uint32_t)((((uint32_t)(ms) * FRAME_HZ) + 999u) / 1000u))
 #define FRAME_PERIOD_US       (1000000u / FRAME_HZ)   /* 10 000 us            */
 #define FRAME_DT_S            (1.0f / (float)FRAME_HZ) /* exact 0.010 s        */
 
@@ -76,7 +82,15 @@
 /* ----------------------------------------------------------------------------
  * 4. SERVO / FIN OUTPUT (see pwm.c for channel-to-pin mapping)
  * -------------------------------------------------------------------------- */
-#define SERVO_PERIOD_US       20000u   /* 50 Hz, safe for any servo; 4000 (250 Hz) for digital */
+/* Servo frame = control frame, and each pulse is STARTED by software right
+ * after the control law (PWM_Commit, timer update event), so the command
+ * latency is the compute time, not up to a full PWM period. The counter period
+ * is a little longer than the frame so it never wraps on its own while frames
+ * run on time; if the loop stalls (log erase) the servos still get a valid
+ * frame every SERVO_PERIOD_US. BMS-127WV+: frame >= 3 ms (333 Hz max, maker
+ * data). Was 20000 (50 Hz) until 7 Nov: an average 10 ms of hidden delay. */
+#define SERVO_PERIOD_US       6000u    /* free-running fallback period          */
+#define SERVO_SYNC_TO_FRAME   1        /* 1 = pulse started each frame (ADR-004) */
 #define SERVO_MIN_US          900u
 #define SERVO_MAX_US          2100u
 #define SERVO_CENTRE_US       1520u    /* fin zero; all fin commands are about this */
@@ -138,15 +152,62 @@
  * HITL showed limit-cycles (G is really k_b*q: 270-5500 rad/s^2 per unit fin
  * over the envelope against the fixed 160). */
 #define CTRL_ROLL_LAW          1
-#define CTRL_ROLL_C            70.0f    /* P.Controller.c (Pa s), Kp = c/q        */
-#define CTRL_ROLL_Q_MIN        2000.0f  /* Pa: schedule floor (envelope low end)  */
+#ifndef CTRL_ROLL_C   /* SITL sweeps override with -D */
+#define CTRL_ROLL_C            15.0f    /* Pa s, Kp = c/q. ADR-004 §3 / MC-01: forward-
+                                         * body Ixx 2.2e-4 (fin can decoupled), 200 Hz
+                                         * synchronous chain. Nominal servo: PM 67 deg,
+                                         * GM 10.8 dB (SAE AS94900: 45 deg / 6 dB). Worst
+                                         * corner (Ixx -30 %, tau_d 21 ms, f_N 52 rad/s):
+                                         * PM 40 deg, GM 4.8 dB. Raise to 18-20 only after
+                                         * the servo bench measures tau_d and f_N. The
+                                         * old 70 is UNSTABLE on the forward body. */
+#endif
+#ifndef CTRL_ROLL_Q_MIN   /* SITL sweeps override with -D */
+#define CTRL_ROLL_Q_MIN        1000.0f  /* Pa: schedule floor. MC-01: 1000 lowers the
+                                         * rail-exit roll peak (p95 222 -> 212 dps)   */
+#endif
 #define CTRL_ROLL_Q_FALLBACK   40000.0f /* Pa: q_hat invalid -> lowest gain       */
 #define CTRL_ROLL_TRAVEL_RAD   0.2094f  /* P.Servo.Travel, +/-12 deg at the canard */
+#ifndef CTRL_TRIM_KI   /* SITL sweeps override with -D */
 #define CTRL_TRIM_KI           0.0234f  /* P.Trim.Ki                              */
-#define CTRL_TRIM_BAND_K       1.1f     /* P.Trim.BandK                           */
+#endif
+#ifndef CTRL_TRIM_BAND_K   /* SITL sweeps override with -D */
+#define CTRL_TRIM_BAND_K       0.3f     /* MC-01 (was 1.1, sized for c = 70: at c = 15
+                                         * the band would ignore ~45 dps at max q)   */
+#endif
 #define CTRL_TRIM_DEADBAND_RAD 0.00196f /* P.Servo.Deadband (n = 1)               */
+#ifndef CTRL_TRIM_CLAMP   /* SITL sweeps override with -D */
 #define CTRL_TRIM_CLAMP        0.1047f  /* P.Trim.Clamp, +/-6 deg                  */
+#endif
+#ifndef CTRL_TRIM_RATE   /* SITL sweeps override with -D */
 #define CTRL_TRIM_RATE         0.0524f  /* P.Trim.Rate, 3 deg/s                    */
+#endif
+/* Trim parameterisation (ADR-004 §3.3). 0 = deflection integrator (Matlab
+ * Trim Mode 2: right for a Cl_0-type disturbance, whose torque scales with q).
+ * 1 = torque-space integrator: the state is T = q * delta_trim, so a constant
+ * TORQUE (the fin-can bearing friction, ~5-10 mN m) is cancelled at every q
+ * without the integrator having to chase 1/q through the coast. */
+#ifndef CTRL_ROLL_BOOST_K           /* large-error gain boost (control.c), 1 = off */
+#define CTRL_ROLL_BOOST_K      4        /* MC-01: hard-over roll peak p95 920 -> 600 dps,
+                                         * max 1240 -> 830; nominal flights unchanged */
+#endif
+#ifndef CTRL_ROLL_BOOST_P
+#define CTRL_ROLL_BOOST_P      5.236f   /* rad/s (300 dps): boost starts here      */
+#endif
+/* Dither (Matlab P.Dither): square wave on the roll command, amplitude 1.5 x
+ * the servo dead band at the canard, period CTRL_DITHER_PERIOD_N frames. */
+#ifndef CTRL_DITHER_ON
+#define CTRL_DITHER_ON         1
+#endif
+#ifndef CTRL_DITHER_AMP_RAD
+#define CTRL_DITHER_AMP_RAD    (1.5f * CTRL_TRIM_DEADBAND_RAD)   /* 0.00294 rad, 0.17 deg */
+#endif
+#ifndef CTRL_DITHER_PERIOD_N
+#define CTRL_DITHER_PERIOD_N   4u       /* 4 frames = 50 Hz at 200 Hz            */
+#endif
+#ifndef CTRL_TRIM_QSCHED
+#define CTRL_TRIM_QSCHED       1        /* MC-01: coast roll RMS p95 60 -> 41 dps    */
+#endif
 
 /* INDI control effectiveness  G : fin deflection [-1,+1] -> body angular accel
  * (rad/s^2).  PLACEHOLDERS — identify from a 6-DOF sim or flight log. They set
@@ -219,26 +280,26 @@
 #define SWEEP_STEP_MS         400u  /*   dwell at centre between steps          */
 #define CFG_TELEM_BINARY      0     /* 1 = binary framed telemetry (PC logger)  */
                                     /* 0 = human-readable status text over USB  */
-#define TEXT_STATUS_DECIMATE  20u   /* text status every N frames -> 5 Hz      */
-#define TELEM_DECIMATE        1u    /* binary STATE frame every N frames -> 100 Hz */
+#define TEXT_STATUS_DECIMATE  (FRAME_HZ / 5u)   /* text status 5 Hz              */
+#define TELEM_DECIMATE        (FRAME_HZ / 100u) /* binary STATE frame 100 Hz      */
 #define CFG_ENABLE_GPS        1     /* ATGM336H NMEA on USART2 (PA3), 9600 Bd   */
 #define GPS_TIMEOUT_MS        2500u /* no sentence for this long = GPS lost      */
 
 /* ----------------------------------------------------------------------------
  * 8. FAULT DETECTION (FDS-01 instance table, fdir.c). Each bound states its
- *    source; persistence counts are in 100 Hz frames.
+ *    source; persistence counts are written in ms (MS_TO_FRAMES).
  * -------------------------------------------------------------------------- */
-#define FDIR_IMU_READ_N       10u    /* 100 ms of failed reads = IMU lost (HARD) */
+#define FDIR_IMU_READ_N       MS_TO_FRAMES(100u)  /* failed reads = IMU lost (HARD) */
 #define FDIR_ACCEL_MAX_MS2    (15.5f * BOARD_G_MPS2) /* +/-16 g FS less 3 %     */
 #define FDIR_GYRO_MAX_DPS     1980.0f /* +/-2048 dps FS less 3 %                */
-#define FDIR_RANGE_N          5u     /* 50 ms                                    */
+#define FDIR_RANGE_N          MS_TO_FRAMES(50u)
 #define FDIR_LOOP_BUDGET_US   (FRAME_PERIOD_US * 8u / 10u) /* 80 % (std B1)     */
-#define FDIR_LOOP_N           3u
-#define FDIR_OVERRUN_N        10u    /* sustained overrun (std B2): HARD on pad  */
+#define FDIR_LOOP_N           MS_TO_FRAMES(30u)
+#define FDIR_OVERRUN_N        MS_TO_FRAMES(100u) /* sustained overrun (std B2): HARD on pad */
 #define FDIR_EST_TILT_VAR_MAX 0.03f  /* rad^2, 2 tilt axes: ~7 deg 1-sigma each. Also
                                       * the 'covariance settled' READY gate (FDS-01
                                       * inst. 7): the seed P0 (0.6) must converge. */
-#define FDIR_EST_COV_N        10u
+#define FDIR_EST_COV_N        MS_TO_FRAMES(100u)
 
 /* Pad READY gate: no SOFT/HARD fault for this long before READY (FDS-01 5.1;
  * bench value — the flight value is 30-60 s). */
@@ -264,8 +325,19 @@
 #define LOG_FLASH_SIZE        (384u * 1024u)
 #define LOG_FIRST_SECTOR      5u
 #define LOG_SECTOR_COUNT      3u
-#define LOG_DECIMATE          2u     /* STATE record every N frames -> 50 Hz      */
-#define LOG_AUTOSTART         0      /* 1 = start logging on entry to READY       */
+/* Logging (ADR-004 §4): pre-trigger ring in RAM while READY; liftoff commits
+ * it to flash oldest-first and recording continues. Rates are phase-scheduled
+ * (FDS-01 §7.1): full rate through boost and coast, reduced under the canopy. */
+#define LOG_HZ_ASCENT         100u   /* READY ring, BOOST, COAST                   */
+#define LOG_HZ_DESCENT        20u    /* DESCENT                                    */
+#define LOG_DECIMATE          (FRAME_HZ / LOG_HZ_ASCENT)
+#define LOG_DECIMATE_DESCENT  (FRAME_HZ / LOG_HZ_DESCENT)
+#define LOG_PRETRIG_RECS      256u   /* 2.56 s at 100 Hz, 12 KB, in the fw stage RAM */
+#define LOG_DRAIN_PER_FRAME   2u     /* backlog records programmed per frame       */
+#define LOG_POST_LAND_MS      60000u /* keep recording after LANDED, then close (covers
+                                      * a premature LANDED under a calm canopy)       */
+#define LOG_MIN_FREE_BYTES    (200u * 1024u) /* READY requires this much erased log */
+#define LOG_AUTOSTART         1      /* 1 = arm the ring on READY (flight default) */
 
 #define APP_FLASH_BASE        0x08000000u
 #define APP_FLASH_SIZE        (128u * 1024u)
@@ -285,6 +357,7 @@
  * and density only moves ~1 %/100 m, so +/-50 m is ample. */
 #define NAV_SITE_ELEV_M       110.0f
 #define NAV_SAT_MPS2          (15.5f * BOARD_G_MPS2)  /* = FDIR accel range bound */
+#define NAV_SAT_BUDGET_N      MS_TO_FRAMES(20u)       /* clipped frames tolerated (nav.h) */
 #define NAV_STILL_ACC_MPS2    0.5f    /* pad zeroing: | |f| - g | below this ...   */
 #define NAV_STILL_GYRO_RADPS  0.10f   /* ... and |w| below this (5.7 dps)          */
 #define NAV_ACC_PSD           0.01f   /* (m/s^2)^2/Hz: VRW is ~5e-7 (measured); this
@@ -299,28 +372,40 @@
 
 /* Detectors. Thresholds from the OpenRocket model (62mm Canard Control V1.0.0):
  * G79W peak 8.3 g, I205W 30 g; liftoff at 3 g is >= 2.8x margin below both and
- * 3x above the 1 g pad. Apogee backup: I205W coast 12.2 s (burnout 1.89 s,
- * apogee 14.08 s) + 20 %. Set per motor. */
+ * 3x above the 1 g pad. Apogee backup timer: see DET_T_APOGEE_MAX_S (MC-01
+ * per-motor table). */
 #define CFG_PHASE_DETECT      1
 #define DET_LIFTOFF_ACC       (3.0f * BOARD_G_MPS2)
-#define DET_LIFTOFF_N         10u     /* 100 ms above DET_LIFTOFF_ACC ...           */
+#define DET_LIFTOFF_N         MS_TO_FRAMES(100u) /* above DET_LIFTOFF_ACC ...     */
 #define DET_LIFTOFF_V_MPS     8.0f    /* ... and nav v_up above this (HITL: a 6 g /
                                        * 60 ms pad knock gave a false liftoff at the
                                        * old 50 ms / acc-only rule)                 */
-#define DET_LIFTOFF_N_NOV     30u     /* 300 ms acc-only if nav is invalid          */
-#define NAV_BRIDGE_N          8u      /* frames: hold the last good specific force
+#define DET_LIFTOFF_N_NOV     MS_TO_FRAMES(300u) /* acc-only if nav is invalid    */
+#define NAV_BRIDGE_N          MS_TO_FRAMES(80u)  /* hold the last good specific force
                                        * through IMU read gaps (< FDIR_IMU_READ_N)  */
 #define DET_T_BOOST_MIN_S     0.10f
 #define DET_BURNOUT_ACC       0.0f    /* axial f < 0: drag exceeds thrust          */
-#define DET_BURNOUT_N         5u
-#define DET_APOGEE_N          5u
-#define DET_T_APOGEE_MAX_S    15.0f   /* after burnout                             */
-#define DET_T_LAND_MIN_S      5.0f
+#define DET_BURNOUT_N         MS_TO_FRAMES(50u)
+#define DET_APOGEE_N          MS_TO_FRAMES(50u)
+#define DET_T_APOGEE_MAX_S    11.5f   /* after burnout. MC-01 (G-motor shortlist):
+                                       * coast p99 x 1.2 = 8.9 (G53FJ) .. 11.2 s (G80T).
+                                       * Set per motor on the pre-flight sheet; 15 s was
+                                       * for the I205W.                              */
+#define DET_T_LAND_MIN_S      15.0f   /* > motor ejection delay (<= 10 s) + inflation:
+                                       * a deployment shock must not latch 'touchdown' */
 #define DET_T_LAND_MAX_S      300.0f  /* I205W descent 145 s (OpenRocket) x 2      */
 #define DET_LAND_ACC_TOL      1.0f
 #define DET_LAND_GYRO_RADPS   0.2f
 #define DET_LAND_V_MPS        1.5f
-#define DET_LAND_N            200u    /* 2 s                                       */
+#define DET_LAND_N            MS_TO_FRAMES(2000u) /* GPS rule                    */
+/* Inertial landing (ADR-004 §5): impact shock + ground stillness. */
+#define DET_LAND_TAU_S        0.5f
+#define DET_LAND_STILL_SD     0.05f   /* m/s^2 (5 mg): 8x the measured sample noise */
+#define DET_LAND_STILL_GYRO   0.05f   /* rad/s (2.9 dps)                           */
+#define DET_LAND_SHOCK_ACC    (3.0f * BOARD_G_MPS2)
+#define DET_LAND_N_SHOCK      MS_TO_FRAMES(2000u)
+#define DET_LAND_N_STILL      MS_TO_FRAMES(30000u) /* no shock: 30 s of ground-level
+                                       * stillness (SITL: 10 s fired under a calm canopy) */
 
 /* ----------------------------------------------------------------------------
  * 11. HARDWARE-IN-THE-LOOP (HITL-01, hitl.c)
@@ -335,6 +420,9 @@
  * -------------------------------------------------------------------------- */
 #define CFG_HITL              1
 #define HITL_WAIT_US          20000u  /* < IWDG (~100 ms) with margin           */
+/* Passive (shadow) flight: the full law runs and is logged, the canards are
+ * held at zero. Flight 1 per FDS-01 §9.1 / James 7 Nov. */
+#define CFG_CTRL_SHADOW       0
 
 /* Flight-build guard: define CFG_FLIGHT_BUILD=1 (compiler -D) for a flight
  * image; the bench-only features must then be off or the build fails. */

@@ -25,10 +25,10 @@ Model (deliberate simplifications, see HITL-01):
     (optimise_roll_schedule.m roll_coeffs) at the current Mach.
   * Actuator: port of canard_servo_reduced.m (quantised command, transport
     delay, deadband, 2nd-order with rate and travel limits, backlash).
-  * IMU: QMI8658A at 224.2 Hz ODR, white noise at the measured density, a
+  * IMU: QMI8658A at 448.4 Hz ODR, white noise at the measured density, a
     1st-order ~30 Hz LPF, constant + random-walk gyro bias, 16-bit
     quantisation, +/-16 g / +/-2048 dps saturation; the board takes the latest
-    ODR sample per 100 Hz frame. Accel scale-factor error per axis (default 0).
+    ODR sample per 200 Hz frame. Accel scale-factor error per axis (default 0).
   * GPS: 1 Hz GGA+RMC, white + slow position error, loses lock above
     gps_lock_g and reacquires gps_reacq_s later.
 """
@@ -229,8 +229,8 @@ def q_exp(rv) -> np.ndarray:
 # ---------------------------------------------------------------------------
 @dataclass
 class ImuCfg:
-    odr_hz: float = 224.2
-    lpf_hz: float = 224.2 * 0.1337
+    odr_hz: float = 448.4                # ADR-004 (224.2 until 7 Nov)
+    lpf_hz: float = 448.4 * 0.1337
     arw_dps_rthz: float = 7.9e-3        # measured 7.37-8.51 mdps/rtHz
     vrw_g_rthz: float = 72e-6           # measured 66-84 ug/rtHz
     gyro_bias_dps: float = 0.02         # 1-sigma residual after boot cal
@@ -292,7 +292,7 @@ class VibGen:
 
 
 class Imu:
-    DECIM = 32                    # QMI8658A: ODR = internal rate / 32 (7174.4 / 224.2 Hz)
+    DECIM = 16                    # QMI8658A: ODR = internal rate / 16 (7174.4 / 448.4 Hz)
 
     def __init__(self, cfg: ImuCfg, rng: np.random.Generator, vib: VibCfg | None = None) -> None:
         self.c, self.rng = cfg, rng
@@ -475,6 +475,11 @@ class Vehicle:
     def ixx(self) -> float:
         if self.c.roll_ixx:
             return self.c.roll_ixx
+        if "Ixx" in self.P["Vehicle"]:
+            # ADR-004: the canards turn the forward body only (free fin can), so
+            # the controlled inertia is P.Vehicle.Ixx, not OpenRocket's whole-
+            # vehicle roll inertia (which includes the can).
+            return float(self.P["Vehicle"]["Ixx"])
         ix = self.m.ixx[np.isfinite(self.m.ixx)]
         return self._interp(np.nan_to_num(self.m.ixx, nan=float(ix[-1])), max(self.t, 0.0))
 

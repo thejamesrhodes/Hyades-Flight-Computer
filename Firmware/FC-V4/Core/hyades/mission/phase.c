@@ -18,7 +18,7 @@ enum { I_BOOT, I_CAL, I_SETTLE, I_READY, I_BOOST, I_COAST, I_DESC, I_LANDED, I_L
 static const uint16_t k_allowed[PHASE_COUNT] = {
     [I_BOOT]   = B(I_CAL)   | B(I_LOCK),
     [I_CAL]    = B(I_SETTLE)| B(I_LOCK),
-    [I_SETTLE] = B(I_READY) | B(I_LOCK),
+    [I_SETTLE] = B(I_READY) | B(I_BOOST) | B(I_LOCK),  /* STM-01 F3: liftoff while not READY */
     [I_READY]  = B(I_SETTLE)| B(I_BOOST) | B(I_LOCK),
     [I_BOOST]  = B(I_COAST) | B(I_CATO),
     [I_COAST]  = B(I_DESC)  | B(I_CATO),

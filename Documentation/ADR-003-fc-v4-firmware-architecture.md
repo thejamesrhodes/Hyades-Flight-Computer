@@ -1,6 +1,6 @@
 # ADR-003: FC-V4 (STM32F411) firmware architecture and bench verification
 
-**Status:** accepted 3 November 2026; updated 7 November 2026 (single-port GPS, IMU noise capture, NAV-01, HITL-01, q̂-scheduled roll law, HITL-02 worst-case campaign). **Code:** `Hyades-Flight-Computer/Firmware/FC-V4`.
+**Status:** accepted 3 November 2026; **roll gains, loop rate, logging and landing superseded by ADR-004 (8 Nov)**; updated 7 November 2026 (single-port GPS, IMU noise capture, NAV-01, HITL-01, q̂-scheduled roll law, HITL-02 worst-case campaign). **Code:** `Hyades-Flight-Computer/Firmware/FC-V4`.
 
 ## Context
 

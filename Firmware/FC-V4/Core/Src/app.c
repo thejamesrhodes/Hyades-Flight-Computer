@@ -7,7 +7,7 @@
  * Frame  100 Hz, TIM5-paced, fixed cadence (never re-synced, std B2), with a
  *        static task table (h743_flight_architecture §1.3). Mandatory tasks
  *        check in; the IWDG is kicked only if all of them ran this frame.
- * Arbiter (FDS-01 P3): the FDIR engine reports, task_fdir decides — phase
+ * Arbiter (FDS-01 P3): the FDIR engine reports, flight.c decides — phase
  *        transitions (READY gating, demotion, LOCKOUT/CATO_SAFE) and the
  *        control-mode ceiling (FULL -> RATE_DAMP -> OFF).
  * All mutable state lives in the single file-scope struct A, owned here.
@@ -33,6 +33,8 @@
 #include "imu.h"
 #include "leds.h"
 #include "logrec.h"
+#include "logq.h"
+#include "flight.h"
 #include "nav.h"
 #include "phase.h"
 #include "pwm.h"
@@ -60,38 +62,33 @@ const char g_build_id[32] = BUILD_GIT_SHA " " __DATE__;
 #define CK_CTRL   (1u << 3)
 #define CK_ALL    (CK_SENSE | CK_EST | CK_FDIR | CK_CTRL)
 
-typedef enum { EV_BOOT = 1, EV_PHASE, EV_TRIP, EV_CLEAR, EV_MODE, EV_LOG, EV_CORRUPT, EV_MAINT } EventCode;
+typedef enum { LOGM_OFF = 0, LOGM_ARMED, LOGM_REC } LogMode;
+typedef char logq_fits_stage[((LOG_PRETRIG_RECS * LOGREC_SIZE) <= FW_STAGE_SIZE) ? 1 : -1];
+typedef char log_rates_divide[(((FRAME_HZ % LOG_HZ_ASCENT) == 0u) && ((FRAME_HZ % LOG_HZ_DESCENT) == 0u)) ? 1 : -1];
 
 static struct {
     I2C_HandleTypeDef *hi2c;
-    PhaseWord  ph;
-    Fdir       fdir;
-    IEKF_State iekf;
-    Controller ctrl;
+    Flight     F;                /* the portable flight pipeline (flight.c)    */
     GyroCal    gcal;
     ImuSample  imu;
-    float      gyro_rad[3];      /* boot-bias-corrected gyro, rad/s (rate damper) */
-    float      fin[4];
-    bool       acc_applied;
     bool       overran, skip_overrun;
     uint32_t   frame, deadline, prev_t, t0, loop_us;
     float      dt;
     uint32_t   ckpt;
-    uint32_t   ready_hold;       /* fault-free frames accumulated in SETTLING */
-    uint32_t   degraded_until_ms;
     uint32_t   imu_fails, overruns;
     bool       stream;           /* periodic status / telemetry on USB */
     bool       erase_req, reboot_req;
     bool       inject_imu;       /* fault injection: force IMU read failures */
-    bool       clear_req;        /* console 'faults clear', served by task_fdir */
+    bool       clear_req;        /* console 'faults clear', served in Flight_Step */
     const char *reset_cause;
     uint32_t   reboot_at_ms;
-    uint32_t   last_active;      /* FDIR active bits last frame (for events) */
-    Nav        nav;              /* NAV-01: h, v, q_hat                      */
-    Detect     det;              /* flight-event detectors                  */
     uint32_t   gps_gga_seen;     /* GGA count last fed to nav               */
-    float      f_last[3];        /* last good specific force (nav bridging)  */
-    uint32_t   f_gap;            /* consecutive frames without a good sample */
+    /* flight log (ADR-004 §4) */
+    LogQ       lq;
+    LogMode    logm;
+    bool       log_space_ok;
+    uint32_t   log_landed_ms;
+    bool       log_landed;
 #if CFG_HITL
     uint32_t   hitl_idx;         /* last host sample index                  */
     bool       hitl_missing;     /* no host sample this frame               */
@@ -100,7 +97,7 @@ static struct {
 } A;
 
 static const NavCfg k_nav_cfg = {
-    .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .still_acc_mps2 = NAV_STILL_ACC_MPS2,
+    .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .sat_budget_n = NAV_SAT_BUDGET_N, .still_acc_mps2 = NAV_STILL_ACC_MPS2,
     .still_gyro_radps = NAV_STILL_GYRO_RADPS, .acc_psd = NAV_ACC_PSD, .gps_var_m2 = NAV_GPS_VAR_M2,
     .gps_nis_max = NAV_GPS_NIS_MAX, .gps_rej_reset = NAV_GPS_REJ_RESET, .gps_v_var = NAV_GPS_V_VAR,
     .q_speed_min = NAV_Q_SPEED_MIN,
@@ -111,17 +108,17 @@ static const DetectCfg k_det_cfg = {
     .burnout_acc = DET_BURNOUT_ACC, .burnout_n = DET_BURNOUT_N, .apogee_n = DET_APOGEE_N,
     .t_apogee_max = DET_T_APOGEE_MAX_S, .t_land_min = DET_T_LAND_MIN_S, .t_land_max = DET_T_LAND_MAX_S,
     .land_acc_tol = DET_LAND_ACC_TOL, .land_gyro = DET_LAND_GYRO_RADPS, .land_v = DET_LAND_V_MPS,
-    .land_n = DET_LAND_N,
+    .land_n = DET_LAND_N, .land_tau = DET_LAND_TAU_S, .land_still_sd = DET_LAND_STILL_SD,
+    .land_still_gyro = DET_LAND_STILL_GYRO, .land_shock_acc = DET_LAND_SHOCK_ACC,
+    .land_n_shock = DET_LAND_N_SHOCK, .land_n_still = DET_LAND_N_STILL,
 };
 
 /* ---------------------------------------------------------------------------
  * Helpers
  * ------------------------------------------------------------------------- */
-static Phase phase_now(void)
-{
-    Phase p;
-    return Phase_Read(&A.ph, &p) ? p : PH_LOCKOUT;
-}
+static Phase phase_now(void) { return Flight_Phase(&A.F); }
+static const char *mode_name(CtrlMode m) { return Flight_ModeName(m); }
+static uint16_t fault_bits(void) { return Flight_FaultBits(&A.F); }
 
 /* Bounded copy into a fixed, NUL-padded field (no strncpy truncation traps). */
 static void copy_text(char *dst, size_t n, const char *src)
@@ -130,9 +127,41 @@ static void copy_text(char *dst, size_t n, const char *src)
     memcpy(dst, src, strnlen(src, n));
 }
 
-static const char *mode_name(CtrlMode m)
+/* ---------------------------------------------------------------------------
+ * Flight log (ADR-004 §4): every record goes through the queue while the
+ * log is armed or recording, so pre-trigger records, events and live
+ * records stay in time order in flash.
+ * ------------------------------------------------------------------------- */
+static void log_emit(const uint8_t r[LOGREC_SIZE])
 {
-    return (m == CTRL_MODE_FULL) ? "FULL" : ((m == CTRL_MODE_RATE_DAMP) ? "RDAMP" : "OFF");
+    if (A.logm != LOGM_OFF) { (void)LogQ_Push(&A.lq, r); }
+}
+
+static bool log_start_flash(void)
+{
+    LogBoot b; memset(&b, 0, sizeof b);
+    b.t_us = Sched_MicrosNow();
+    b.frame_hz = FRAME_HZ; b.log_hz = LOG_HZ_ASCENT;
+    copy_text(b.build, sizeof b.build, g_build_id);
+    return FlashLog_Start(&b);
+}
+
+static void log_drain(uint32_t max)
+{
+    if (A.logm != LOGM_REC) { return; }
+    for (uint32_t k = 0u; k < max; k++) {
+        const uint8_t *r = LogQ_Peek(&A.lq);
+        if (r == NULL) { break; }
+        (void)FlashLog_Write(r);        /* a write error is counted in flashlog, never retried */
+        LogQ_Pop(&A.lq);
+    }
+}
+
+static void log_close(void)
+{
+    if (A.logm == LOGM_REC) { log_drain(0xFFFFFFFFu); FlashLog_Stop(); }
+    A.logm = LOGM_OFF;
+    LogQ_Reset(&A.lq);
 }
 
 /* Event: console line + flight-log record (if logging). */
@@ -140,42 +169,55 @@ static void event(EventCode code, uint32_t arg0, const char *text)
 {
     const Phase ph = phase_now();
     Con_Printf("[EVT] t=%lu ms %s: %s\r\n", (unsigned long)HAL_GetTick(), Phase_Name(ph), text);
-    if (FlashLog_Active()) {
+    if (A.logm != LOGM_OFF) {
         LogEvent e;
         memset(&e, 0, sizeof e);
         e.t_us = Sched_MicrosNow(); e.seq = FlashLog_NextSeq();
         e.code = (uint8_t)code; e.phase = Phase_Index(ph); e.arg0 = arg0;
+        e.arg1 = A.lq.dropped;
         copy_text(e.text, sizeof e.text, text);
         uint8_t r[LOGREC_SIZE];
         LogRec_PackEvent(r, &e);
-        (void)FlashLog_Write(r);
+        log_emit(r);
     }
 }
 
-static void go_phase(Phase to)
+/* Logger reaction to a phase edge (called from the flight-core callback). */
+static void log_on_phase(Phase to)
 {
-    const Phase from = phase_now();
-    if ((from != to) && Phase_Transition(&A.ph, to)) {
-        char t[26];
-        (void)snprintf(t, sizeof t, "%s->%s", Phase_Name(from), Phase_Name(to));
-        event(EV_PHASE, (uint32_t)to, t);
-        if ((to == PH_READY) && (LOG_AUTOSTART != 0)) {
-            LogBoot b; memset(&b, 0, sizeof b);
-            b.frame_hz = FRAME_HZ; b.log_hz = FRAME_HZ / LOG_DECIMATE;
-            copy_text(b.build, sizeof b.build, g_build_id);
-            if (FlashLog_Start(&b)) { event(EV_LOG, 0u, "log autostart"); }
+    if (to == PH_READY) {
+        if ((LOG_AUTOSTART != 0) && (A.logm == LOGM_OFF) && !Fw_Busy() && A.log_space_ok) {
+            LogQ_Reset(&A.lq);
+            A.logm = LOGM_ARMED;
+            event(EV_LOG, LOG_PRETRIG_RECS, "log armed (pre-trigger)");
         }
+    } else if (to == PH_BOOST) {
+        if (A.logm != LOGM_REC) {
+            if (log_start_flash()) {
+                if (A.logm == LOGM_OFF) { LogQ_Reset(&A.lq); }
+                LogQ_Commit(&A.lq);
+                A.logm = LOGM_REC;
+                event(EV_LOG, LogQ_Count(&A.lq), "log committed at liftoff");
+            }
+        }
+    } else if (to == PH_LANDED) {
+        A.log_landed = true; A.log_landed_ms = HAL_GetTick();
+    } else if ((A.logm == LOGM_ARMED) && ((to == PH_SETTLING) || (to == PH_LOCKOUT))) {
+        A.logm = LOGM_OFF;                        /* pad demotion: the ring is discarded */
+        LogQ_Reset(&A.lq);
+    } else {
+        /* no log action */
     }
 }
 
-static void faults_clear_serve(Phase ph);   /* console command, served in task_fdir */
-
-static uint16_t fault_bits(void)
+static void on_flight_event(void *ctx, EventCode code, uint32_t arg, const char *text)
 {
-    uint32_t l = 0xFFFFu;
-    (void)Fdir_LatchRead(&A.fdir, &l);
-    return (uint16_t)((A.fdir.active | l) & 0xFFFFu);
+    (void)ctx;
+    event(code, arg, text);
+    if (code == EV_PHASE) { log_on_phase((Phase)arg); }
 }
+
+static void go_phase(Phase to) { Flight_GoPhase(&A.F, to); }
 
 /* ---------------------------------------------------------------------------
  * Tasks
@@ -198,8 +240,8 @@ static void hitl_sense(void)
         A.imu.ok = fin && ((s.flags & HITL_SF_FAIL) == 0u);
         if (A.imu.ok && !A.hitl_seeded) {
             const float m0[3] = { 0.0f, 0.0f, 0.0f };
-            IEKF_Seed(&A.iekf, A.imu.accel, m0);
-            Nav_Init(&A.nav, &k_nav_cfg);
+            IEKF_Seed(&A.F.iekf, A.imu.accel, m0);
+            Nav_Init(&A.F.nav, &k_nav_cfg);
             A.hitl_seeded = true;
             event(EV_MAINT, s.idx, "HITL live: IMU+GPS from host");
         }
@@ -217,189 +259,112 @@ static void task_sense(void)
 #if CFG_FAULT_INJECTION
     if (A.inject_imu) { A.imu.ok = false; }
 #endif
-    for (uint32_t k = 0u; k < 3u; k++) { A.gyro_rad[k] = A.imu.gyro[k] * D2R; }
     if (!A.imu.ok) { A.imu_fails++; }
 #if CFG_ENABLE_GPS
-    GPS_Poll(256u);                               /* 9600 bps = ~10 B per frame */
+    GPS_Poll(256u);                               /* 9600 bps = ~5 B per 5 ms frame */
 #endif
     A.ckpt |= CK_SENSE;
 }
 
-/* GPS -> nav: site elevation on the pad, altitude aiding after apogee only. */
-static void nav_gps(Phase ph)
+/* Estimate, monitor, arbitrate and control in one call (flight.c), then
+ * command the servos and start their pulses (PWM_Commit, ADR-004 §2). */
+static void task_flight(void)
 {
+    FlightIn in;
+    memset(&in, 0, sizeof in);
+    in.imu_ok = A.imu.ok;
+    for (uint32_t k = 0u; k < 3u; k++) { in.accel[k] = A.imu.accel[k]; in.gyro_dps[k] = A.imu.gyro[k]; }
+    in.loop_us = A.loop_us;
+    in.overran = A.overran;
+    in.skip_overrun = A.skip_overrun;
+    in.now_ms = HAL_GetTick();
+    in.clear_req = A.clear_req;
+    A.clear_req = false;
 #if CFG_ENABLE_GPS
     const GpsData *g = GPS_Get();
-    if (g->gga == A.gps_gga_seen) { return; }
-    A.gps_gga_seen = g->gga;
-    const bool good = (g->fix_quality > 0u) && (g->sats >= NAV_GPS_SATS_MIN) && (g->hdop <= NAV_GPS_HDOP_MAX);
-    if (!good) { return; }
-    if ((ph == PH_SETTLING) || (ph == PH_READY)) {
-        Nav_PadGps(&A.nav, g->alt_msl_m);
-    } else if ((ph == PH_DESCENT) || (ph == PH_LANDED)) {
-        (void)Nav_GpsAlt(&A.nav, g->alt_msl_m);
-    } else {
-        /* boost/coast: not used (lock loss, 1 Hz) */
+    in.gps_enabled = true;
+    in.gps_alive = GPS_Alive(GPS_TIMEOUT_MS);
+    if (g->gga != A.gps_gga_seen) {
+        A.gps_gga_seen = g->gga;
+        in.gps_new = true;
+        in.gps_good = (g->fix_quality > 0u) && (g->sats >= NAV_GPS_SATS_MIN) && (g->hdop <= NAV_GPS_HDOP_MAX);
+        in.gps_alt_msl = g->alt_msl_m;
     }
-#else
-    (void)ph;
 #endif
-}
-
-static void task_estimate(void)
-{
-    A.acc_applied = false;
-    if (A.imu.ok) {
-        IEKF_Predict(&A.iekf, A.imu.gyro, A.dt);
-        A.acc_applied = IEKF_UpdateAccel(&A.iekf, A.imu.accel);
-        const Phase ph = phase_now();
-        const bool pad = !Phase_InFlight(ph) && (ph != PH_CATO_SAFE);
-        Nav_Step(&A.nav, A.iekf.q, A.imu.accel, A.iekf.omega, A.dt, pad);
-        nav_gps(ph);
-        for (uint32_t k = 0u; k < 3u; k++) { A.f_last[k] = A.imu.accel[k]; }
-        A.f_gap = 0u;
-    } else if ((A.f_gap < NAV_BRIDGE_N) && Phase_InFlight(phase_now())) {
-        /* Short read gap in flight: integrate the last good specific force
-         * (HITL: a 50 ms boost dropout otherwise cost ~13 % in q_hat). The
-         * attitude is held (no gyro), so this is only for a few frames. */
-        A.f_gap++;
-        Nav_Step(&A.nav, A.iekf.q, A.f_last, A.iekf.omega, A.dt, false);
-    } else {
-        A.f_gap++;
-    }
-    A.ckpt |= CK_EST;
-}
-
-static void task_fdir(void)
-{
-    Phase ph;
-    if (!Phase_Read(&A.ph, &ph)) {                /* protected word corrupt */
-        Phase_ForceSafe(&A.ph, false);
-        event(EV_CORRUPT, 0u, "phase word corrupt");
-        ph = phase_now();
-    }
-    const bool fl = Phase_InFlight(ph);
-
-    /* --- consistency monitors (residuals; bounds in board.h §8) --- */
-    const float an = sqrtf((A.imu.accel[0] * A.imu.accel[0]) + (A.imu.accel[1] * A.imu.accel[1])
-                           + (A.imu.accel[2] * A.imu.accel[2]));
-    const float wn = sqrtf((A.imu.gyro[0] * A.imu.gyro[0]) + (A.imu.gyro[1] * A.imu.gyro[1])
-                           + (A.imu.gyro[2] * A.imu.gyro[2]));
-    (void)Fdir_Eval(&A.fdir, MON_IMU_READ,    A.imu.ok ? 0.0f : 1.0f, fl);
-    (void)Fdir_Eval(&A.fdir, MON_ACCEL_RANGE, an, fl);
-    (void)Fdir_Eval(&A.fdir, MON_GYRO_RANGE,  wn, fl);
-    (void)Fdir_Eval(&A.fdir, MON_LOOP_TIME,   (float)A.loop_us, fl);
-    (void)Fdir_Eval(&A.fdir, MON_OVERRUN,     (A.overran && !A.skip_overrun) ? 1.0f : 0.0f, fl);
-    (void)Fdir_Eval(&A.fdir, MON_EST_FINITE,  IEKF_IsFinite(&A.iekf) ? 0.0f : 1.0f, fl);
-    (void)Fdir_Eval(&A.fdir, MON_EST_COV,     IEKF_TiltVar(&A.iekf), fl);
-#if CFG_ENABLE_GPS
-    (void)Fdir_Eval(&A.fdir, MON_GPS_LINK,    GPS_Alive(GPS_TIMEOUT_MS) ? 0.0f : 1.0f, fl);
+    A.log_space_ok = (FlashLog_CapacityBytes() - FlashLog_UsedBytes()) >= LOG_MIN_FREE_BYTES;
+#if defined(CFG_FLIGHT_BUILD) && (CFG_FLIGHT_BUILD != 0)
+    in.ready_inhibit = (LOG_AUTOSTART != 0) && !A.log_space_ok;   /* no flight without a log */
 #endif
+    Flight_Step(&A.F, &in, A.dt);
     A.skip_overrun = false;
-
-    /* --- report trips/clears (detectors report; the arbiter below acts) --- */
-    const uint32_t changed = A.fdir.active ^ A.last_active;
-    for (uint32_t i = 0u; i < (uint32_t)MON_COUNT; i++) {
-        if ((changed & (1u << i)) == 0u) { continue; }
-        char t[26];
-        const bool on = (A.fdir.active & (1u << i)) != 0u;
-        (void)snprintf(t, sizeof t, "%s %s", on ? "trip" : "clear", Fdir_Config((MonId)i)->name);
-        event(on ? EV_TRIP : EV_CLEAR, i, t);
+    for (uint8_t i = 0u; i < FIN_COUNT; i++) { PWM_SetFin(i, A.F.fin[i]); }
+    PWM_Commit();
+    switch (A.F.last_clear) {
+    case FCLR_OK:              Con_Printf("faults clear: OK\r\n"); break;
+    case FCLR_IN_FLIGHT:       Con_Printf("ERR not in flight\r\n"); break;
+    case FCLR_STILL_ACTIVE:    Con_Printf("ERR faults still active (%02lX): fix the cause first\r\n",
+                                          (unsigned long)(A.F.fdir.active & Fdir_HardMask(false))); break;
+    case FCLR_RECOVER_REFUSED: Con_Printf("ERR phase recover refused\r\n"); break;
+    default: break;
     }
-    A.last_active = A.fdir.active;
-    if (A.clear_req) {                            /* operator clear, after this frame's evaluation */
-        faults_clear_serve(ph);
-        ph = phase_now();
-    }
-
-    /* --- flight-event detectors (requests; the phase table decides) ---
-     * Before the pad demotion below: a fast motor can clip the accelerometer
-     * at liftoff and trip accel_rng (SOFT) in the same frames that confirm
-     * liftoff; demoting READY -> SETTLING then would leave the vehicle in
-     * flight with control disabled. A HARD fault still blocks every request
-     * except landing: DESCENT has no CATO edge, and control is already off,
-     * so a sensor lost under the parachute must not leave the board in a
-     * flight phase (which refuses log pull / reboot) forever. */
-#if CFG_PHASE_DETECT
-    if ((Fdir_Worst(&A.fdir, fl) != SEV_HARD) || (ph == PH_DESCENT)) {
-        DetectIn in;
-        memset(&in, 0, sizeof in);
-        if (A.imu.ok) {
-            in.f_axial = A.imu.accel[2];                  /* body +Z = nose */
-            in.f_norm = an;
-            in.w_norm = wn * D2R;
-        }
-        in.v_up = Nav_VUp(&A.nav);
-        in.v_valid = Nav_QValid(&A.nav);
-        in.v_gps = (A.nav.flags & NAV_F_GPS_AIDED) != 0u;
-        const Phase to = Detect_Step(&A.det, ph, &in, A.dt);
-        if (to != ph) { go_phase(to); ph = phase_now(); }
-    }
-#endif
-
-    /* --- arbiter: phase --- */
-    const FdirSev worst = Fdir_Worst(&A.fdir, Phase_InFlight(ph));
-    if (worst == SEV_HARD) {
-        go_phase(fl ? PH_CATO_SAFE : PH_LOCKOUT);
-    } else if (ph == PH_SETTLING) {
-        A.ready_hold = (worst == SEV_INFO) ? (A.ready_hold + 1u) : 0u;
-        if (A.ready_hold >= ((READY_HOLD_MS * FRAME_HZ) / 1000u)) { go_phase(PH_READY); }
-    } else if ((ph == PH_READY) && (worst == SEV_SOFT) && !Detect_LiftoffPending(&A.det)) {
-        A.ready_hold = 0u;
-        go_phase(PH_SETTLING);                    /* demote; re-promotion needs the full hold */
-    } else {
-        /* no transition */
-    }
-
-    /* --- arbiter: control-mode ceiling (degraded-mode ladder) --- */
-    CtrlMode m = CTRL_MODE_OFF;
-    if (Phase_ActuationAllowed(phase_now(), CFG_BENCH_ACTUATE_READY != 0)) {
-        const FdirCap cap = Fdir_Capability(&A.fdir);
-        m = (cap == CAP_FULL) ? CTRL_MODE_FULL : ((cap == CAP_GYRO_ONLY) ? CTRL_MODE_RATE_DAMP : CTRL_MODE_OFF);
-    }
-    if (m != A.ctrl.mode) {
-        char t[26];
-        (void)snprintf(t, sizeof t, "ctrl %s->%s", mode_name(A.ctrl.mode), mode_name(m));
-        Ctrl_SetMode(&A.ctrl, m);
-        event(EV_MODE, (uint32_t)m, t);
-    }
-    /* Degraded indication: any SOFT/HARD fault, or actuating below FULL. */
-    if ((worst >= SEV_SOFT) || ((m != CTRL_MODE_FULL)
-            && Phase_ActuationAllowed(phase_now(), CFG_BENCH_ACTUATE_READY != 0))) {
-        A.degraded_until_ms = HAL_GetTick() + 1000u;
-    }
-    A.ckpt |= CK_FDIR;
+    A.ckpt |= CK_EST | CK_FDIR | CK_CTRL;
 }
 
-static void task_control(void)
-{
-    Ctrl_SetQbar(&A.ctrl, A.nav.qbar, Nav_QValid(&A.nav) && (A.ctrl.mode == CTRL_MODE_FULL));
-    Ctrl_Update(&A.ctrl, A.iekf.q, A.iekf.omega, A.gyro_rad, A.dt, A.fin);
-    for (uint8_t i = 0u; i < FIN_COUNT; i++) { PWM_SetFin(i, A.fin[i]); }
-    A.ckpt |= CK_CTRL;
-}
-
+/* Every frame: drain the backlog first (so this frame's record always fits),
+ * then the phase-scheduled STATE record and a 1 Hz AUX record. */
 static void task_log(void)
 {
-    if (!FlashLog_Active()) { return; }
-    LogState s;
-    s.t_us = A.t0; s.seq = FlashLog_NextSeq();
-    s.phase = Phase_Index(phase_now()); s.mode = (uint8_t)A.ctrl.mode;
-    s.flags = (uint8_t)((A.imu.ok ? (LOGF_GYRO_OK | LOGF_ACCEL_OK) : 0u)
-            | (A.acc_applied ? LOGF_ACC_APPLIED : 0u) | (A.overran ? LOGF_OVERRUN : 0u)
+    log_drain(LOG_DRAIN_PER_FRAME);
+    if (A.logm == LOGM_OFF) { return; }
+    const Phase ph = phase_now();
+    const uint32_t dec = ((ph == PH_DESCENT) || (ph == PH_LANDED)) ? LOG_DECIMATE_DESCENT : LOG_DECIMATE;
+    if ((A.frame % dec) == 0u) {
+        LogState s;
+        memset(&s, 0, sizeof s);
+        s.t_us = A.t0; s.seq = FlashLog_NextSeq();
+        s.phase = Phase_Index(ph); s.mode = (uint8_t)A.F.ctrl.mode;
+        s.flags = (uint8_t)((A.imu.ok ? (LOGF_GYRO_OK | LOGF_ACCEL_OK) : 0u)
+                | (A.F.acc_applied ? LOGF_ACC_APPLIED : 0u) | (A.overran ? LOGF_OVERRUN : 0u)
+                | (A.F.shadow ? LOGF_SHADOW : 0u) | ((A.logm == LOGM_ARMED) ? LOGF_PRETRIG : 0u)
 #if CFG_ENABLE_GPS
-            | (GPS_HasFix(GPS_TIMEOUT_MS) ? LOGF_GPS_FIX : 0u)
+                | (GPS_HasFix(GPS_TIMEOUT_MS) ? LOGF_GPS_FIX : 0u)
 #endif
-            );
-    for (uint32_t k = 0u; k < 4u; k++) { s.q[k] = A.iekf.q[k]; s.fin[k] = A.fin[k]; }
-    for (uint32_t k = 0u; k < 3u; k++) {
-        s.w_dps[k] = A.imu.gyro[k]; s.a_ms2[k] = A.imu.accel[k]; s.bias_dps[k] = A.iekf.bias[k] * R2D;
+                );
+        for (uint32_t k = 0u; k < 4u; k++) {
+            s.q[k] = A.F.iekf.q[k];
+            s.fin[k] = A.F.shadow ? A.F.fin_cmd[k] : A.F.fin[k];
+        }
+        for (uint32_t k = 0u; k < 3u; k++) { s.w_dps[k] = A.imu.gyro[k]; s.a_ms2[k] = A.imu.accel[k]; }
+        s.h_m = Nav_Height(&A.F.nav); s.v_up = Nav_VUp(&A.F.nav); s.qbar_pa = A.F.nav.qbar;
+        s.trim_rad = A.F.ctrl.trim;
+        s.loop_us = (A.loop_us > 0xFFFFu) ? 0xFFFFu : (uint16_t)A.loop_us;
+        s.faults = fault_bits();
+        uint8_t r[LOGREC_SIZE];
+        LogRec_PackState(r, &s);
+        log_emit(r);
     }
-    s.loop_us = (A.loop_us > 0xFFFFu) ? 0xFFFFu : (uint16_t)A.loop_us;
-    s.faults = fault_bits();
-    uint8_t r[LOGREC_SIZE];
-    LogRec_PackState(r, &s);
-    if (!FlashLog_Write(r) && !FlashLog_Active()) { event(EV_LOG, 0u, "log full, stopped"); }
+    if ((A.frame % FRAME_HZ) == 1u) {
+        LogAux x;
+        memset(&x, 0, sizeof x);
+        x.t_us = A.t0; x.seq = FlashLog_NextSeq(); x.phase = Phase_Index(ph);
+        x.nav_flags = (uint8_t)(A.F.nav.flags & 0xFFu); x.mode = (uint8_t)A.F.ctrl.mode;
+        for (uint32_t k = 0u; k < 3u; k++) { x.bias_dps[k] = A.F.iekf.bias[k] * R2D; }
+#if CFG_ENABLE_GPS
+        const GpsData *g = GPS_Get();
+        x.sats = g->sats; x.gps_alt_m = g->alt_msl_m;
+        x.hdop10 = (g->hdop >= 25.5f) ? 255u : (uint8_t)(g->hdop * 10.0f);
+#endif
+        x.dropped = A.lq.dropped; x.imu_fails = (uint16_t)((A.imu_fails > 0xFFFFu) ? 0xFFFFu : A.imu_fails);
+        x.wcet_us = (uint16_t)((A.loop_us > 0xFFFFu) ? 0xFFFFu : A.loop_us);
+        uint8_t r[LOGREC_SIZE];
+        LogRec_PackAux(r, &x);
+        log_emit(r);
+    }
+    if (A.log_landed && ((HAL_GetTick() - A.log_landed_ms) >= LOG_POST_LAND_MS) && (A.logm == LOGM_REC)) {
+        event(EV_LOG, A.lq.dropped, "log closed after landing");
+        log_close();
+        A.log_landed = false;
+    }
 }
 
 #if CFG_TELEM_BINARY
@@ -407,20 +372,20 @@ static void send_binary(void)
 {
     TelemState st;
     st.t_us = A.t0; st.frame = A.frame;
-    IEKF_GetEuler(&A.iekf, &st.euler[0], &st.euler[1], &st.euler[2]);
+    IEKF_GetEuler(&A.F.iekf, &st.euler[0], &st.euler[1], &st.euler[2]);
     for (uint32_t k = 0u; k < 3u; k++) {
         st.omega[k] = A.imu.gyro[k]; st.accel[k] = A.imu.accel[k];
-        st.mag[k] = 0.0f; st.bias[k] = A.iekf.bias[k];
+        st.mag[k] = 0.0f; st.bias[k] = A.F.iekf.bias[k];
     }
-    for (uint32_t k = 0u; k < 4u; k++) { st.q[k] = A.iekf.q[k]; st.fin[k] = A.fin[k]; }
+    for (uint32_t k = 0u; k < 4u; k++) { st.q[k] = A.F.iekf.q[k]; st.fin[k] = A.F.fin[k]; }
     const Phase ph = phase_now();
-    uint16_t h = (uint16_t)((uint32_t)A.ctrl.mode << TELEM_H_MODE_SHIFT);
+    uint16_t h = (uint16_t)((uint32_t)A.F.ctrl.mode << TELEM_H_MODE_SHIFT);
     if (A.imu.ok)                      { h |= TELEM_H_ACCEL_OK | TELEM_H_GYRO_OK; }
-    if (A.acc_applied)                 { h |= TELEM_H_ACCEL_APPLIED; }
-    if (A.ctrl.mode != CTRL_MODE_OFF)  { h |= TELEM_H_CTRL_ACTIVE; }
+    if (A.F.acc_applied)                 { h |= TELEM_H_ACCEL_APPLIED; }
+    if (A.F.ctrl.mode != CTRL_MODE_OFF)  { h |= TELEM_H_CTRL_ACTIVE; }
     if (A.overran)                     { h |= TELEM_H_OVERRUN; }
     if (!Phase_ActuationAllowed(ph, CFG_BENCH_ACTUATE_READY != 0)) { h |= TELEM_H_SETTLING; }
-    if (Fdir_Worst(&A.fdir, Phase_InFlight(ph)) >= SEV_SOFT)      { h |= TELEM_H_FAULT; }
+    if (Fdir_Worst(&A.F.fdir, Phase_InFlight(ph)) >= SEV_SOFT)      { h |= TELEM_H_FAULT; }
     if ((ph == PH_LOCKOUT) || (ph == PH_CATO_SAFE))               { h |= TELEM_H_LOCKOUT; }
     st.health = h;
     st.loop_us = (A.loop_us > 0xFFFFu) ? 0xFFFFu : (uint16_t)A.loop_us;
@@ -430,7 +395,7 @@ static void send_binary(void)
 static void send_text(void)
 {
     float r, p, y;
-    IEKF_GetEuler(&A.iekf, &r, &p, &y);
+    IEKF_GetEuler(&A.F.iekf, &r, &p, &y);
     const float an = sqrtf((A.imu.accel[0] * A.imu.accel[0]) + (A.imu.accel[1] * A.imu.accel[1])
                            + (A.imu.accel[2] * A.imu.accel[2])) / BOARD_G_MPS2;
     const GpsData *g = GPS_Get();
@@ -440,25 +405,25 @@ static void send_text(void)
     const char *gst = "off";
 #endif
     uint32_t l = 0xFFFFFFFFu;
-    (void)Fdir_LatchRead(&A.fdir, &l);
+    (void)Fdir_LatchRead(&A.F.fdir, &l);
     char b[15][CON_FX_LEN];
     Con_Printf("t=%lu.%02lu %s %s f=%02lX/%02lX RPY %s %s %s w %s %s %s |a|=%s fin %s %s %s %s "
                "imu=%s(%lu) loop=%lu ovr=%lu gps=%s s%u alt=%s rx=%lu nmea=%lu log=%lu%% h=%s vz=%s q=%s\r\n",
                (unsigned long)(A.t0 / 1000000u), (unsigned long)((A.t0 / 10000u) % 100u),
-               Phase_Name(phase_now()), mode_name(A.ctrl.mode),
-               (unsigned long)A.fdir.active, (unsigned long)l,
+               Phase_Name(phase_now()), mode_name(A.F.ctrl.mode),
+               (unsigned long)A.F.fdir.active, (unsigned long)l,
                Con_Fx(b[0], r, 1u), Con_Fx(b[1], p, 1u), Con_Fx(b[2], y, 1u),
-               Con_Fx(b[3], A.iekf.omega[0] * R2D, 1u), Con_Fx(b[4], A.iekf.omega[1] * R2D, 1u),
-               Con_Fx(b[5], A.iekf.omega[2] * R2D, 1u), Con_Fx(b[6], an, 2u),
-               Con_Fx(b[7], A.fin[0], 2u), Con_Fx(b[8], A.fin[1], 2u),
-               Con_Fx(b[9], A.fin[2], 2u), Con_Fx(b[10], A.fin[3], 2u),
+               Con_Fx(b[3], A.F.iekf.omega[0] * R2D, 1u), Con_Fx(b[4], A.F.iekf.omega[1] * R2D, 1u),
+               Con_Fx(b[5], A.F.iekf.omega[2] * R2D, 1u), Con_Fx(b[6], an, 2u),
+               Con_Fx(b[7], A.F.fin[0], 2u), Con_Fx(b[8], A.F.fin[1], 2u),
+               Con_Fx(b[9], A.F.fin[2], 2u), Con_Fx(b[10], A.F.fin[3], 2u),
                A.imu.ok ? "OK" : "FAIL", (unsigned long)A.imu_fails,
                (unsigned long)A.loop_us, (unsigned long)A.overruns,
                gst, (unsigned)g->sats, Con_Fx(b[11], g->alt_msl_m, 1u),
                (unsigned long)g->bytes, (unsigned long)g->sentences,
                (unsigned long)((FlashLog_UsedBytes() * 100u) / FlashLog_CapacityBytes()),
-               Con_Fx(b[12], Nav_Height(&A.nav), 1u), Con_Fx(b[13], Nav_VUp(&A.nav), 1u),
-               Con_Fx(b[14], A.nav.qbar, 0u));
+               Con_Fx(b[12], Nav_Height(&A.F.nav), 1u), Con_Fx(b[13], Nav_VUp(&A.F.nav), 1u),
+               Con_Fx(b[14], A.F.nav.qbar, 0u));
 }
 #endif
 
@@ -493,7 +458,7 @@ static void task_leds(void)
     g = GPS_HasFix(GPS_TIMEOUT_MS) ? GPS_LED_FIX : (GPS_Alive(GPS_TIMEOUT_MS) ? GPS_LED_NOFIX : GPS_LED_NONE);
 #endif
     const uint32_t now = HAL_GetTick();
-    Leds_Update(phase_now(), (int32_t)(A.degraded_until_ms - now) > 0, g, now);
+    Leds_Update(phase_now(), (int32_t)(A.F.degraded_until_ms - now) > 0, g, now);
 }
 
 /* ---------------------------------------------------------------------------
@@ -509,10 +474,8 @@ typedef struct {
 
 static Task s_tasks[] = {
     { "sense",    task_sense,    1u,                 0u, 0u, 0u },
-    { "estimate", task_estimate, 1u,                 0u, 0u, 0u },
-    { "fdir",     task_fdir,     1u,                 0u, 0u, 0u },
-    { "control",  task_control,  1u,                 0u, 0u, 0u },
-    { "log",      task_log,      LOG_DECIMATE,       1u, 0u, 0u },
+    { "flight",   task_flight,   1u,                 0u, 0u, 0u },
+    { "log",      task_log,      1u,                 0u, 0u, 0u },
 #if CFG_TELEM_BINARY
     { "telem",    task_telem,    TELEM_DECIMATE,     0u, 0u, 0u },
 #else
@@ -571,40 +534,19 @@ static void faults_clear_request(void)
     A.clear_req = true;
 }
 
-/* Called from task_fdir after this frame's monitors have run, so "still
- * failing" means failing now, not one frame ago. */
-static void faults_clear_serve(Phase ph)
-{
-    A.clear_req = false;
-    if (Phase_InFlight(ph) || (ph == PH_CATO_SAFE)) { Con_Printf("ERR not in flight\r\n"); return; }
-    const uint32_t hard_active = A.fdir.active & Fdir_HardMask(false);
-    if (hard_active != 0u) {
-        Con_Printf("ERR faults still active (%02lX): fix the cause first\r\n", (unsigned long)hard_active);
-        return;
-    }
-    Fdir_ClearLatch(&A.fdir);
-    A.last_active = A.fdir.active;
-    if (ph == PH_LOCKOUT) {
-        if (!Phase_Recover(&A.ph)) { Con_Printf("ERR phase recover refused\r\n"); return; }
-        A.ready_hold = 0u;
-    }
-    event(EV_CLEAR, 0u, "faults cleared (operator)");
-    Con_Printf("faults clear: OK\r\n");
-}
-
 static void cmd_faults(uint32_t argc, char *argv[])
 {
     if ((argc >= 2u) && (strcmp(argv[1], "clear") == 0)) { faults_clear_request(); return; }
     uint32_t l = 0u;
-    const bool ok = Fdir_LatchRead(&A.fdir, &l);
-    Con_Printf("phase %s  ctrl %s  latch %s%08lX\r\n", Phase_Name(phase_now()), mode_name(A.ctrl.mode),
+    const bool ok = Fdir_LatchRead(&A.F.fdir, &l);
+    Con_Printf("phase %s  ctrl %s  latch %s%08lX\r\n", Phase_Name(phase_now()), mode_name(A.F.ctrl.mode),
                ok ? "" : "CORRUPT ", (unsigned long)l);
     Con_Printf("  monitor    act lat  trips  count  last_r\r\n");
     for (uint32_t i = 0u; i < (uint32_t)MON_COUNT; i++) {
         char b[CON_FX_LEN];
         Con_Printf("  %-10s %u   %u   %5u  %5u  %s\r\n", Fdir_Config((MonId)i)->name,
-                   (unsigned)((A.fdir.active >> i) & 1u), (unsigned)((l >> i) & 1u),
-                   (unsigned)A.fdir.trips[i], (unsigned)A.fdir.count[i], Con_Fx(b, A.fdir.last_r[i], 3u));
+                   (unsigned)((A.F.fdir.active >> i) & 1u), (unsigned)((l >> i) & 1u),
+                   (unsigned)A.F.fdir.trips[i], (unsigned)A.F.fdir.count[i], Con_Fx(b, A.F.fdir.last_r[i], 3u));
     }
 }
 
@@ -667,7 +609,7 @@ static void imu_capture(void) __attribute__((noreturn));
 static void imu_capture(void)
 {
     const Qmi8658 *d = IMU_Driver();
-    FlashLog_Stop();
+    log_close();
     PWM_CentreFins();
     A.stream = false;
     Con_Printf("IMUCAP v1 odr_mHz=%lu a_lsb_per_g=%lu g_lsb_per_dps_x1000=%lu ctrl=%02X %02X %02X %02X %02X %02X %02X "
@@ -715,15 +657,15 @@ static void cmd_log(uint32_t argc, char *argv[])
     const bool flying = Phase_InFlight(phase_now());
     const char *sub = (argc >= 2u) ? argv[1] : "info";
     if (strcmp(sub, "start") == 0) {
-        LogBoot b; memset(&b, 0, sizeof b);
-        b.frame_hz = FRAME_HZ; b.log_hz = FRAME_HZ / LOG_DECIMATE;
-        copy_text(b.build, sizeof b.build, g_build_id);
-        const bool ok = FlashLog_Start(&b);
+        if (A.logm == LOGM_REC) { Con_Printf("log start: already recording\r\n"); return; }
+        const bool ok = log_start_flash();          /* bench session: straight to recording */
+        if (ok) { if (A.logm == LOGM_OFF) { LogQ_Reset(&A.lq); } LogQ_Commit(&A.lq); A.logm = LOGM_REC; }
         Con_Printf("log start: %s\r\n", ok ? "OK" : "FAILED (full? 'log erase')");
         if (ok) { event(EV_LOG, 0u, "log start"); }
     } else if (strcmp(sub, "stop") == 0) {
+        if (flying) { Con_Printf("ERR not in flight\r\n"); return; }
         event(EV_LOG, 0u, "log stop");
-        FlashLog_Stop();
+        log_close();
         Con_Printf("log stop: OK\r\n");
     } else if (strcmp(sub, "erase") == 0) {
         if (flying) { Con_Printf("ERR not in flight\r\n"); return; }
@@ -733,7 +675,8 @@ static void cmd_log(uint32_t argc, char *argv[])
         if (!FlashLog_PullStart()) { Con_Printf("ERR pull busy\r\n"); }
     } else {
         Con_Printf("log %s, %lu/%lu B used (%lu records), %lu write errors\r\n",
-                   FlashLog_Active() ? "RECORDING" : "idle", (unsigned long)FlashLog_UsedBytes(),
+                   (A.logm == LOGM_REC) ? "RECORDING" : ((A.logm == LOGM_ARMED) ? "ARMED (pre-trigger)" : "idle"),
+                   (unsigned long)FlashLog_UsedBytes(),
                    (unsigned long)FlashLog_CapacityBytes(), (unsigned long)(FlashLog_UsedBytes() / LOGREC_SIZE),
                    (unsigned long)FlashLog_WriteErrors());
     }
@@ -742,7 +685,7 @@ static void cmd_log(uint32_t argc, char *argv[])
 static void cmd_fw(uint32_t argc, char *argv[])
 {
     if (Phase_InFlight(phase_now())) { Con_Printf("FWABORT in-flight\r\n"); return; }
-    if (FlashLog_Active()) { FlashLog_Stop(); event(EV_LOG, 0u, "log stop (fw update)"); }
+    if (A.logm != LOGM_OFF) { event(EV_LOG, 0u, "log stop (fw update)"); log_close(); }  /* frees the stage RAM */
     Fw_Command(argc, argv);
 }
 
@@ -754,7 +697,7 @@ static void cmd_reboot(uint32_t argc, char *argv[])
     sim = Hitl_Live();
 #endif
     if (Phase_InFlight(phase_now()) && !sim) { Con_Printf("ERR not in flight\r\n"); return; }
-    FlashLog_Stop();
+    log_close();
     PWM_CentreFins();
     Con_Printf("rebooting\r\n");
     A.reboot_req = true;
@@ -775,7 +718,7 @@ static void cmd_inject(uint32_t argc, char *argv[])
         PWM_CentreFins();
         for (;;) { }                                   /* interrupts still run; no kick */
     } else if (strcmp(what, "phase") == 0) {
-        A.ph.v ^= 0x10u;                               /* single-bit upset */
+        A.F.ph.v ^= 0x10u;                               /* single-bit upset */
         Con_Printf("inject phase: flipped one bit of the phase word\r\n");
     } else if (strcmp(what, "imu") == 0) {
         A.inject_imu = true;
@@ -882,12 +825,10 @@ static void boot(UART_HandleTypeDef *huart)
     Con_Init(k_cmds, (uint32_t)(sizeof k_cmds / sizeof k_cmds[0]));
     Sched_Init();
     PWM_Init();                                       /* all fins centred */
-    Phase_Init(&A.ph);
-    Fdir_Init(&A.fdir);
-    Ctrl_Init(&A.ctrl);
-    IEKF_Init(&A.iekf);
-    Nav_Init(&A.nav, &k_nav_cfg);
-    Detect_Init(&A.det, &k_det_cfg);
+    Flight_Init(&A.F, &k_nav_cfg, &k_det_cfg, MS_TO_FRAMES(READY_HOLD_MS), NAV_BRIDGE_N,
+                CFG_BENCH_ACTUATE_READY != 0, on_flight_event, NULL);
+    LogQ_Init(&A.lq, (uint8_t (*)[LOGREC_SIZE])(void *)Fw_StageBuffer(), LOG_PRETRIG_RECS);
+    A.logm = LOGM_OFF;
     FlashLog_Init();
     A.stream = true;
     Leds_Update(PH_BOOT, false, GPS_LED_NONE, 0u);
@@ -924,9 +865,9 @@ static void boot(UART_HandleTypeDef *huart)
             HAL_Delay(5);
         }
         if (n > 0u) { for (uint32_t k = 0u; k < 3u; k++) { a0[k] /= (float)n; } }
-        IEKF_Seed(&A.iekf, a0, m0);
+        IEKF_Seed(&A.F.iekf, a0, m0);
         float r, p, y;
-        IEKF_GetEuler(&A.iekf, &r, &p, &y);
+        IEKF_GetEuler(&A.F.iekf, &r, &p, &y);
         char b[6][CON_FX_LEN];
         Con_Printf("[BOOT] gyro bias dps %s %s %s | seed RPY deg %s %s %s\r\n",
                    Con_Fx(b[0], A.gcal.bias[0], 3u), Con_Fx(b[1], A.gcal.bias[1], 3u),
@@ -968,13 +909,13 @@ static void hitl_reply(void)
     memset(&r, 0, sizeof r);
     r.idx = A.hitl_idx;
     r.phase = Phase_Index(phase_now());
-    r.mode = (uint8_t)A.ctrl.mode;
+    r.mode = (uint8_t)A.F.ctrl.mode;
     r.faults = fault_bits();
     r.loop_us = (A.loop_us > 0xFFFFu) ? 0xFFFFu : (uint16_t)A.loop_us;
-    r.nav_flags = (uint8_t)(A.nav.flags & 0xFFu);
+    r.nav_flags = (uint8_t)(A.F.nav.flags & 0xFFu);
     r.hitl_flags = A.hitl_missing ? HITL_RF_MISSING : 0u;
-    for (uint32_t k = 0u; k < 4u; k++) { r.fin[k] = A.fin[k]; r.q[k] = A.iekf.q[k]; }
-    r.h = Nav_Height(&A.nav); r.v_up = Nav_VUp(&A.nav); r.speed = A.nav.speed; r.qbar = A.nav.qbar;
+    for (uint32_t k = 0u; k < 4u; k++) { r.fin[k] = A.F.fin[k]; r.q[k] = A.F.iekf.q[k]; }
+    r.h = Nav_Height(&A.F.nav); r.v_up = Nav_VUp(&A.F.nav); r.speed = A.F.nav.speed; r.qbar = A.F.nav.qbar;
     (void)Hitl_Reply(&r);
 }
 #endif

@@ -6,3 +6,7 @@ build-host/
 Core/Inc/build_id.h
 Tools/logs/
 Tools/__pycache__/
+Tools/sitl/sitl
+Tools/sitl/sitl_*
+Tools/sitl/runs/*/runs.csv
+Tools/sitl/runs/*.log

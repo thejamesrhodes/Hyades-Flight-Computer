@@ -64,6 +64,9 @@ typedef struct {
     float qbar;               /* Pa, last value given to Ctrl_SetQbar         */
     bool  q_valid;            /* false -> CTRL_ROLL_Q_FALLBACK (low gain)     */
     float trim;               /* bounded trim integrator, rad at the canard   */
+    float trim_T;             /* CTRL_TRIM_QSCHED 1: trim state as q*delta (Pa rad) */
+    uint32_t dither_k;        /* roll-law calls since actuation began (dither phase) */
+    float dither;             /* dither added this frame, rad at the canard   */
 
     /* outer-loop integral on the Lie algebra (anti-windup: norm-clamped) */
     float e_I[3];

@@ -39,8 +39,9 @@ static void test_pad_demotion_only_backwards_edge(void)
     TEST_ASSERT_TRUE(Phase_Transition(&W, PH_READY));
     TEST_ASSERT_TRUE(Phase_Transition(&W, PH_SETTLING));   /* demote */
     TEST_ASSERT_FALSE(Phase_Transition(&W, PH_CALIBRATE)); /* no other way back */
-    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_BOOST));     /* must be READY first */
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_LANDED));    /* no skipping to recovery phases */
     TEST_ASSERT_EQUAL_HEX16(PH_SETTLING, now());
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_BOOST));      /* STM-01 F3: liftoff while not READY is sequenced */
 }
 
 static void test_no_flight_backwards_or_skips(void)
@@ -106,7 +107,7 @@ static void test_recover_only_from_lockout(void)
     Phase_ForceSafe(&W, false);                                      /* LOCKOUT */
     TEST_ASSERT_TRUE(Phase_Recover(&W));
     TEST_ASSERT_EQUAL_HEX16(PH_SETTLING, now());
-    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_BOOST));               /* must pass READY first */
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_COAST));               /* no skipping BOOST */
     W.v ^= 0x4u;                                                     /* corrupt word */
     TEST_ASSERT_TRUE(Phase_Recover(&W));
     TEST_ASSERT_EQUAL_HEX16(PH_SETTLING, now());

@@ -47,10 +47,14 @@ static void test_liftoff_without_nav(void)
     TEST_ASSERT_EQUAL_HEX16(PH_BOOST, run(PH_READY, sat, 1u));
 }
 
+/* STM-01 F3: liftoff is detected from READY and SETTLING (a launch that was
+ * not READY must still be sequenced and logged), never from LOCKOUT. */
 static void test_no_liftoff_outside_ready(void)
 {
     DetectIn boost = { .f_axial = 10.0f * G };
-    TEST_ASSERT_EQUAL_HEX16(PH_SETTLING, run(PH_SETTLING, boost, 100u));
+    TEST_ASSERT_EQUAL_HEX16(PH_BOOST, run(PH_SETTLING, boost, 100u));
+    setUp();
+    TEST_ASSERT_EQUAL_HEX16(PH_LOCKOUT, run(PH_LOCKOUT, boost, 100u));
 }
 
 static void test_burnout_after_min_time(void)
@@ -76,9 +80,9 @@ static void test_apogee_on_velocity_or_timer(void)
 
 static void test_landing_needs_gps_or_backup(void)
 {
-    DetectIn chute = { .f_norm = G, .w_norm = 0.0f, .v_up = -5.0f, .v_gps = true };
+    DetectIn chute = { .imu_ok = true, .f_norm = G, .w_norm = 0.0f, .v_up = -5.0f, .v_gps = true };
     TEST_ASSERT_EQUAL_HEX16(PH_DESCENT, run(PH_DESCENT, chute, 2000u));
-    DetectIn ground = { .f_norm = G, .w_norm = 0.0f, .v_up = 0.1f, .v_gps = true };
+    DetectIn ground = { .imu_ok = true, .f_norm = G, .w_norm = 0.0f, .v_up = 0.1f, .v_gps = true };
     TEST_ASSERT_EQUAL_HEX16(PH_LANDED, run(PH_DESCENT, ground, 200u));
 
     setUp();
