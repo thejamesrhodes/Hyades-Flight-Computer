@@ -67,7 +67,7 @@ static float clampf(float x, float lim)
 void Ctrl_Init(Controller *c)
 {
     c->mode = CTRL_MODE_OFF;
-    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f;
+    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f; c->trim_T = 0.0f;
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; c->omega_prev[i]=0.0f; }
     for (int i=0;i<4;i++) { c->delta_f[i]=0.0f; c->fin_last[i]=0.0f; }
     for (int i=0;i<3;i++) { c->bq_wdot[i].z1=0.0f; c->bq_wdot[i].z2=0.0f; }
@@ -79,7 +79,7 @@ void Ctrl_SetMode(Controller *c, CtrlMode mode)
 {
     if (mode == c->mode) { return; }
     c->mode = mode;
-    if (mode == CTRL_MODE_OFF) { c->trim = 0.0f; }   /* trim kept across FULL<->RDAMP */
+    if (mode == CTRL_MODE_OFF) { c->trim = 0.0f; c->trim_T = 0.0f; c->dither_k = 0u; c->dither = 0.0f; }   /* trim kept across FULL<->RDAMP */
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; biquad_preload(c, &c->bq_wdot[i], 0.0f); }
     for (int i=0;i<4;i++) {
         c->delta_f[i] = c->fin_last[i];
@@ -100,19 +100,55 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
 {
     float q_e = c->q_valid ? c->qbar : CTRL_ROLL_Q_FALLBACK;
     if (q_e < CTRL_ROLL_Q_MIN) { q_e = CTRL_ROLL_Q_MIN; }
-    const float Kp = CTRL_ROLL_C / q_e;                 /* rad per rad/s       */
+    float Kp = CTRL_ROLL_C / q_e;                       /* rad per rad/s       */
+#if CTRL_ROLL_BOOST_K > 1
+    /* Large-error gain boost (ADR-004 §3.4): beyond CTRL_ROLL_BOOST_P the gain
+     * ramps up to K x over another CTRL_ROLL_BOOST_P. Normal flight never gets
+     * there (MC-01 p99 |p| < 200 dps); a canard hard-over does, and the extra
+     * gain drives the healthy canards to oppose it at once instead of waiting
+     * for the trim. The ramp avoids a gain step at the threshold. */
+    {
+        const float ex = (fabsf(p) - CTRL_ROLL_BOOST_P) / CTRL_ROLL_BOOST_P;
+        const float k = (ex <= 0.0f) ? 1.0f : ((ex >= 1.0f) ? (float)CTRL_ROLL_BOOST_K
+                                                         : (1.0f + (((float)CTRL_ROLL_BOOST_K - 1.0f) * ex)));
+        Kp *= k;
+    }
+#endif
     const float d_damp = -Kp * p;                       /* p_e = ref - p, ref 0 */
     if (trim_on) {
         const float e = -p;
         const float e_band = CTRL_TRIM_BAND_K * CTRL_TRIM_DEADBAND_RAD / Kp;
         const float drive = (fabsf(e) > e_band) ? (e - copysignf(e_band, e)) : 0.0f;
+#if CTRL_TRIM_QSCHED
+        c->trim = clampf(c->trim_T / q_e, CTRL_TRIM_CLAMP);   /* torque state -> deflection now */
+#endif
         const bool sat = fabsf(d_damp + c->trim) >= (CTRL_ROLL_TRAVEL_RAD * 0.999f);
         if (!sat) {
             const float step = clampf(CTRL_TRIM_KI * drive, CTRL_TRIM_RATE);
+#if CTRL_TRIM_QSCHED
+            const float tmax = CTRL_TRIM_CLAMP * q_e;
+            c->trim_T = clampf(c->trim_T + (step * q_e * dt), tmax);
+            c->trim = clampf(c->trim_T / q_e, CTRL_TRIM_CLAMP);
+#else
             c->trim = clampf(c->trim + (step * dt), CTRL_TRIM_CLAMP);
+#endif
         }
     }
-    return clampf(d_damp + c->trim, CTRL_ROLL_TRAVEL_RAD);
+#if CTRL_DITHER_ON
+    /* Dither (Matlab P.Dither, ADR-004 §3.6): a square wave on the command,
+     * +a +a -a -a at the frame rate (FRAME_HZ / CTRL_DITHER_PERIOD_N = 50 Hz at
+     * 200 Hz). It keeps the servo's internal position error moving across its
+     * dead band so the dead-band/quantiser limit cycle cannot lock, and the
+     * surface barely follows it (servo f_N ~12.7 Hz: about 6 % at 50 Hz). The
+     * Matlab design used 125 Hz, above what a 200 Hz servo frame can carry;
+     * P.Dither notes 60-80 Hz as the fallback for a capped frame rate. Added
+     * after the trim saturation test, so it never winds the trim. */
+    c->dither = (((c->dither_k / (CTRL_DITHER_PERIOD_N / 2u)) & 1u) == 0u) ? CTRL_DITHER_AMP_RAD : -CTRL_DITHER_AMP_RAD;
+    c->dither_k++;
+#else
+    c->dither = 0.0f;
+#endif
+    return clampf(d_damp + c->trim + c->dither, CTRL_ROLL_TRAVEL_RAD);
 }
 
 /* Gyro-only rate damper: fin = -K * rate, per channel, clipped. With the

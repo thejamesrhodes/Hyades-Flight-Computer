@@ -43,6 +43,15 @@ if ~isfield(cfg,'unc_delta'), cfg.unc_delta = 0.30;  end
 if ~isfield(cfg,'unc_p'),     cfg.unc_p     = 0.30;  end
 if ~isfield(cfg,'plot'),      cfg.plot      = true;  end
 if ~isfield(cfg,'quiet'),     cfg.quiet     = false; end
+% Digital implementation delay (ADR-004 §2), on top of P.Servo.Tau_d:
+%   tau_extra = IMU sample age + compute + frame ZOH (T/2) + servo pulse read
+%               (+ T_pwm/2 if the PWM is not frame-synchronous)
+%   lpf_hz    = IMU anti-alias LPF corner, modelled as 2nd-order Butterworth
+% Both default to 0 / off so existing calls are unchanged. The 7 Nov firmware
+% (100 Hz frame, 50 Hz async PWM, 224 Hz ODR, 30 Hz LPF) is tau_extra = 19.2 ms,
+% lpf_hz = 30; the ADR-004 build (200 Hz synced, 448 Hz, 60 Hz) is 6.6 ms, 60.
+if ~isfield(cfg,'tau_extra'), cfg.tau_extra = 0;     end   % s
+if ~isfield(cfg,'lpf_hz'),    cfg.lpf_hz    = 0;     end   % Hz, 0 = none
 % Flight condition set. cfg.env is an N-by-2 list of PAIRED (q, V) points and
 % is the default, because the outer product of a q list and a V list is mostly
 % fiction: with q from 2 to 40 kPa and V from 40 to 280 m/s, 59% of the grid
@@ -90,7 +99,11 @@ end
 Cvec = logspace(log10(C0/4), log10(C0*4), 120);
 w    = logspace(-2, log10(30*wn), 2500);
 jw   = 1i*w;
-Hact = wn^2 ./ (jw.^2 + 2*zeta*wn.*jw + wn^2) .* exp(-jw*tau_d);
+Hact = wn^2 ./ (jw.^2 + 2*zeta*wn.*jw + wn^2) .* exp(-jw*(tau_d + cfg.tau_extra));
+if cfg.lpf_hz > 0
+    wl = 2*pi*cfg.lpf_hz;
+    Hact = Hact .* wl^2 ./ (jw.^2 + sqrt(2)*wl.*jw + wl^2);
+end
 
 scd = [1-cfg.unc_delta, 1, 1+cfg.unc_delta];
 scp = [1-cfg.unc_p,     1, 1+cfg.unc_p];

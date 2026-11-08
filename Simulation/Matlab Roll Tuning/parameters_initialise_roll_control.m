@@ -13,7 +13,15 @@ P.Aero.y_Cp = 0.03975;   %OVERWRITTEN below from the geometry -- see the note
 %% Vehicle
 P.Vehicle.V = 100;  %Airspeed / m/s
 P.Vehicle.Mass = 0.9;   %Mass / kg      STALE -- UPDATE FROM CAD
-P.Vehicle.Ixx = 0.0007; %Inertia / kg m^2 STALE -- UPDATE FROM CAD
+P.Vehicle.Ixx = 2.2e-4; %Roll inertia of the FORWARD BODY / kg m^2 (ADR-004 §3, 7 Nov)
+                        % The rear fin can spins free on bearings (Free-Spinning Fin
+                        % Can spec), so the canards only turn the forward body:
+                        % OpenRocket whole-vehicle roll inertia 4.78e-4 less the
+                        % can (spec Ip ~2.6e-4). Bounded 1.5-4.0e-4 because the
+                        % OpenRocket fin mass is overridden (6 g for 4 fins).
+                        % MEASURE with a trifilar pendulum before flight.
+                        % Was 0.0007 ("STALE"): with it c = 70 looked stable;
+                        % on 2.2e-4 c = 70 has PM ~0 even with no digital delay.
                         % These predate the current build, which is expected to
                         % come out nearer 1.2-1.5 kg all-up including motor.
                         % Ixx sets the plant gain b = A*d*Cl_delta*q/Ixx
@@ -116,7 +124,17 @@ P.Servo.dt       = 5e-4;     %Actuator model step / s -- set the MATLAB Function
                              % block's sample time to this
 
 %% Controller
-P.Controller.c = 70;   %Proportional q-scheduled constant: Kp = c/q_e
+P.Controller.c = 15;   %Proportional q-scheduled constant: Kp = c/q_e
+                        % ADR-004 §3.2 (8 Nov): c = 15, nominal PM 67 deg / GM 10.8 dB,
+                        % worst corner 40 deg / 4.8 dB (SAE AS94900, NESC TB 22-05).
+                        % The robust-by-margin value below (12) was the 7 Nov interim.
+                        % ADR-004 §3 (7 Nov): robust choice over Ixx 1.5-2.9e-4,
+                        % servo Tau_d +50 %, f_N -35 %, aero +/-30 %, with the
+                        % 200 Hz synchronous digital chain (tau_extra 6.6 ms,
+                        % 60 Hz IMU LPF): PM >= 52, GM >= 2.2, Ms <= 2.03.
+                        % adr004_margin_check.m reproduces the margins.
+                        % Previous value 70 (history below) is UNSTABLE on the
+                        % forward-body inertia.
                         % STALE -- RE-DERIVE. This value predates the canard
                         % resize and the schedule fix. optimise_roll_schedule.m
                         % now derives Cl_delta, Cl_p, Ixx and f_N from this file
@@ -194,7 +212,9 @@ P.Trim.BandK    = 1.1;      %Dead zone on the integrator input, as a multiple
 % caps at 333 Hz, drop to 60-80 Hz, still two decades above the roll mode.
 P.Dither.On   = 1;
 P.Dither.Amp  = 1.5 * P.Servo.Deadband;   % rad at the canard
-P.Dither.Freq = 125;                       %Hz
+P.Dither.Freq = 50;                        %Hz. ADR-004 §3.5: the flown firmware uses a
+                                           % 50 Hz square wave (+a +a -a -a at 200 Hz frames);
+                                           % 125 Hz cannot pass a 200 Hz servo frame.
 
 P.Trim.External = 0;        %Trim from an external estimator, used when Mode = 1
 

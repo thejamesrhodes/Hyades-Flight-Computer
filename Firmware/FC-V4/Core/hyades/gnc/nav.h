@@ -53,6 +53,10 @@
 typedef struct {
     float h_site_m;        /* default pad elevation above MSL (config)          */
     float sat_mps2;        /* |f| per axis at/above this = clipped              */
+    uint16_t sat_budget_n; /* clipped frames tolerated before NAV_F_SAT (0 = the
+                            * first clipped frame flags, the pre-ADR-004 rule).
+                            * Bound on the velocity error a budget can hide:
+                            * n * dt * overshoot, 4 x 5 ms x 2 g = 0.4 m/s.  */
     float still_acc_mps2;  /* | |f| - g_ref | below this = stationary candidate  */
     float still_gyro_radps;/* |w| below this = stationary candidate             */
     float acc_psd;         /* white accel PSD for the vertical KF, (m/s^2)^2/Hz  */
@@ -73,6 +77,7 @@ typedef struct {
     float    gps_sum;      /* pad GPS altitude average -> h_site                */
     uint32_t gps_n;
     uint16_t gps_rej;      /* consecutive NIS rejections                        */
+    uint16_t sat_count;    /* clipped frames since the pad (sat_budget_n)       */
     float    h_site;       /* in use (m MSL)                                    */
     float    a_up;         /* last nav-frame up acceleration (m/s^2)            */
     float    speed, rho, qbar;

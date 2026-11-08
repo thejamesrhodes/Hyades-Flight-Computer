@@ -87,3 +87,19 @@ void PWM_CentreFins(void)
 {
     for (uint8_t i = 0u; i < FIN_COUNT; i++) { PWM_SetPulse(fin_chan[i], SERVO_CENTRE_US); }
 }
+
+/* Start a new servo pulse on every channel NOW with the compare values just
+ * written (ADR-004 §2). The compare registers are preloaded (HAL PWM config
+ * sets OCxPE), so the update event both resets the counters and latches the
+ * new widths: command-to-pulse latency is a few cycles instead of up to one
+ * PWM period, and the servo frame rate equals the control frame rate. If the
+ * loop stops calling this (log erase, a stall) the counters free-run at
+ * SERVO_PERIOD_US and the servos keep receiving the last valid pulse. TIM2
+ * and TIM3 are updated back to back, so the fins start within ~0.1 us. */
+void PWM_Commit(void)
+{
+#if SERVO_SYNC_TO_FRAME
+    TIM2->EGR = TIM_EGR_UG;
+    TIM3->EGR = TIM_EGR_UG;
+#endif
+}

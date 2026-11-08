@@ -35,5 +35,9 @@ bool Fw_RxIsr(const uint8_t *buf, uint32_t len);
 
 /* True while a transfer/verification is in progress (keep the link quiet). */
 bool Fw_Busy(void);
+/* The 96 KB staging buffer, lent to the flight-log pre-trigger ring while no
+ * update is in progress (ADR-004 §4). The caller must stop using it before
+ * any 'fw' command is passed to Fw_Command (app.c cmd_fw disarms the ring). */
+uint8_t *Fw_StageBuffer(void);
 
 #endif /* FWUPDATE_H_ */

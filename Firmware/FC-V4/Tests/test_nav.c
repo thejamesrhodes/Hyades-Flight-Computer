@@ -78,6 +78,19 @@ static void test_saturation_flags_until_pad(void)
     TEST_ASSERT_TRUE(Nav_QValid(&N));
 }
 
+/* ADR-004: isolated clipped frames within the budget keep q_hat valid;
+ * one more than the budget invalidates it (until the pad / GPS re-anchor). */
+static void test_saturation_budget(void)
+{
+    NavCfg c = cfg(); c.sat_budget_n = 4u; Nav_Init(&N, &c);
+    pad(9.81f, 100u);
+    const float hi[3] = { 0.0f, 0.0f, 16.0f * 9.80665f }, ok[3] = { 0.0f, 0.0f, 12.0f * 9.80665f };
+    for (int k = 0; k < 4; k++) { Nav_Step(&N, Q_UP, hi, W0, DT, false); Nav_Step(&N, Q_UP, ok, W0, DT, false); }
+    TEST_ASSERT_TRUE(Nav_QValid(&N));
+    Nav_Step(&N, Q_UP, hi, W0, DT, false);
+    TEST_ASSERT_FALSE(Nav_QValid(&N));
+}
+
 static void test_isa_density_and_qbar(void)
 {
     TEST_ASSERT_FLOAT_WITHIN(1e-3f, 1.2250f, Nav_IsaDensity(0.0f));
@@ -140,6 +153,7 @@ int main(void)
     RUN_TEST(test_liftoff_integrated_from_first_sample);
     RUN_TEST(test_attitude_rotates_specific_force);
     RUN_TEST(test_saturation_flags_until_pad);
+    RUN_TEST(test_saturation_budget);
     RUN_TEST(test_isa_density_and_qbar);
     RUN_TEST(test_gps_pulls_height_and_gates_outliers);
     RUN_TEST(test_pad_gps_sets_site);

@@ -47,8 +47,14 @@ void LogRec_PackState(uint8_t r[LOGREC_SIZE], const LogState *s)
     for (uint32_t i = 0u; i < 3u; i++) {
         put16(r, 18u + 2u*i, (uint16_t)q16(s->w_dps[i],    10.0f));
         put16(r, 24u + 2u*i, (uint16_t)q16(s->a_ms2[i],    100.0f));
-        put16(r, 30u + 2u*i, (uint16_t)q16(s->bias_dps[i], 100.0f));
     }
+    put16(r, 30u, (uint16_t)q16(s->h_m, 10.0f));
+    put16(r, 32u, (uint16_t)q16(s->v_up, 100.0f));
+    {
+        const float qh = isfinite(s->qbar_pa) ? (s->qbar_pa * 0.5f) : 0.0f;
+        put16(r, 34u, (qh <= 0.0f) ? 0u : ((qh >= 65535.0f) ? 0xFFFFu : (uint16_t)lroundf(qh)));
+    }
+    put16(r, 44u, (uint16_t)q16(s->trim_rad, 1.0e4f));
     for (uint32_t i = 0u; i < 4u; i++) { r[36u + i] = (uint8_t)q8(s->fin[i]); }
     put16(r, 40u, s->loop_us);
     put16(r, 42u, s->faults);
@@ -79,9 +85,24 @@ void LogRec_PackBoot(uint8_t r[LOGREC_SIZE], const LogBoot *b)
     seal(r);
 }
 
+void LogRec_PackAux(uint8_t r[LOGREC_SIZE], const LogAux *a)
+{
+    memset(r, 0, LOGREC_SIZE);
+    r[0] = LOGREC_AUX; r[1] = a->phase; r[2] = a->nav_flags; r[3] = a->sats;
+    put32(r, 4u, a->t_us);
+    put16(r, 8u, a->seq);
+    for (uint32_t i = 0u; i < 3u; i++) { put16(r, 10u + 2u*i, (uint16_t)q16(a->bias_dps[i], 100.0f)); }
+    put16(r, 16u, (uint16_t)q16(a->gps_alt_m, 1.0f));
+    r[18] = a->hdop10; r[19] = a->mode;
+    put32(r, 20u, a->dropped);
+    put16(r, 24u, a->wcet_us);
+    put16(r, 26u, a->imu_fails);
+    seal(r);
+}
+
 bool LogRec_Valid(const uint8_t r[LOGREC_SIZE])
 {
-    if ((r[0] != LOGREC_STATE) && (r[0] != LOGREC_EVENT) && (r[0] != LOGREC_BOOT)) { return false; }
+    if ((r[0] != LOGREC_STATE) && (r[0] != LOGREC_EVENT) && (r[0] != LOGREC_BOOT) && (r[0] != LOGREC_AUX)) { return false; }
     return get16(r, LOGREC_SIZE - 2u) == crc16_ccitt(r, LOGREC_SIZE - 2u);
 }
 
@@ -95,8 +116,11 @@ bool LogRec_UnpackState(const uint8_t r[LOGREC_SIZE], LogState *s)
     for (uint32_t i = 0u; i < 3u; i++) {
         s->w_dps[i]    = (float)(int16_t)get16(r, 18u + 2u*i) / 10.0f;
         s->a_ms2[i]    = (float)(int16_t)get16(r, 24u + 2u*i) / 100.0f;
-        s->bias_dps[i] = (float)(int16_t)get16(r, 30u + 2u*i) / 100.0f;
     }
+    s->h_m      = (float)(int16_t)get16(r, 30u) / 10.0f;
+    s->v_up     = (float)(int16_t)get16(r, 32u) / 100.0f;
+    s->qbar_pa  = (float)get16(r, 34u) * 2.0f;
+    s->trim_rad = (float)(int16_t)get16(r, 44u) / 1.0e4f;
     for (uint32_t i = 0u; i < 4u; i++) { s->fin[i] = (float)(int8_t)r[36u + i] / 127.0f; }
     s->loop_us = get16(r, 40u);
     s->faults  = get16(r, 42u);

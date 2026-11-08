@@ -48,7 +48,18 @@ typedef struct {
     float    land_acc_tol;    /* m/s^2 about g                                */
     float    land_gyro;       /* rad/s                                        */
     float    land_v;          /* m/s                                          */
-    uint16_t land_n;
+    uint16_t land_n;          /* GPS rule persistence                         */
+    /* Inertial landing rules (no GPS needed). Stillness = EWMA of |f| and |w|
+     * over land_tau: sd(|f|) < land_still_sd, mean |w| < land_still_gyro and
+     * mean |f| within land_acc_tol of g. Under a canopy the swing and the
+     * turbulence keep sd(|f|) and |w| well above these; on the ground they
+     * fall to the sensor floor (0.6 mg, 8 mdps/rtHz measured). */
+    float    land_tau;        /* s, EWMA time constant                        */
+    float    land_still_sd;   /* m/s^2                                        */
+    float    land_still_gyro; /* rad/s                                        */
+    float    land_shock_acc;  /* m/s^2: impact spike latches 'touchdown seen' */
+    uint16_t land_n_shock;    /* stillness persistence after a shock          */
+    uint16_t land_n_still;    /* stillness persistence with no shock seen     */
 } DetectCfg;
 
 typedef struct {
@@ -58,12 +69,16 @@ typedef struct {
     float v_up;               /* nav vertical velocity, m/s                   */
     bool  v_valid;            /* nav not saturated                            */
     bool  v_gps;              /* v_up GPS-aided (landing test)                */
+    bool  imu_ok;             /* f_norm / w_norm are valid this frame         */
 } DetectIn;
 
 typedef struct {
     DetectCfg c;
     Phase     last;
     uint16_t  n;
+    uint16_t  n2;             /* second persistence counter (landing)         */
+    float     f_mean, f_var, w_mean;   /* landing EWMA state                  */
+    bool      ewma_init, shock_seen;
     uint32_t  t_ms;           /* time in the current phase (integer: a float
                                * sum of 0.01 drifts ~0.5 s over 300 s)       */
     float     t;              /* t_ms in seconds                              */

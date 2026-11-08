@@ -48,7 +48,7 @@ bool IMU_Init(I2C_HandleTypeDef *hi2c)
     i2c1_bus_recover(hi2c);
 
     const Qmi8658Config cfg = { QMI8658_ADDR_SA0_LOW, QMI_AFS_16G, QMI_GFS_2048,
-                                QMI_ODR_224HZ, QMI_LPF_13P37 };
+                                QMI_ODR_448HZ, QMI_LPF_13P37 };   /* ADR-004: 448 Hz, LPF ~60 Hz */
     if (!QMI8658_Init(&s_qmi, hi2c, &cfg)) { return false; }
     return self_test();
 }

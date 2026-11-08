@@ -8,7 +8,7 @@ fc_pull.py -- download and decode the FC-V4 flight log over USB.
 Firmware side: Core/Src/flashlog.c (protocol), Core/hyades/svc/logrec.h (format).
 Each "log start" begins a session (BOOT record); one CSV pair per session:
   session<N>_state.csv   t_s, phase, mode, flags, q0..q3, w*_dps, a*_ms2,
-                         bias*_dps, fin0..3, loop_us, faults
+                         x0..x3 (v1: bias xyz dps; v2: h m, v_up m/s, q_hat Pa, trim rad), fin0..3, loop_us, faults; v2 adds sessionN_aux.csv (1 Hz bias, GPS, dropped)
   session<N>_events.csv  t_s, phase, code, arg0, arg1, text
 Records failing their CRC (torn by power loss) are counted and skipped.
 Requires: pip install pyserial  (decoding needs only the standard library)
@@ -24,7 +24,7 @@ import time
 import zlib
 
 REC = 48
-T_STATE, T_EVENT, T_BOOT = 0x51, 0xE5, 0xB7
+T_STATE, T_EVENT, T_BOOT, T_AUX = 0x51, 0xE5, 0xB7, 0xA7
 PHASES = ["BOOT", "CAL", "SETTLE", "READY", "BOOST", "COAST", "DESCENT", "LANDED", "LOCKOUT", "CATO"]
 MODES = ["OFF", "RDAMP", "FULL"]
 
@@ -41,13 +41,14 @@ def decode(raw: bytes, outdir: str) -> None:
         r = raw[off:off + REC]
         if r[0] == 0xFF:
             break
-        if r[0] not in (T_STATE, T_EVENT, T_BOOT) or not crc_ok(r):
+        if r[0] not in (T_STATE, T_EVENT, T_BOOT, T_AUX) or not crc_ok(r):
             bad += 1
             continue
         if r[0] == T_BOOT or not sessions:
             build = r[12:44].split(b"\0")[0].decode("ascii", "replace") if r[0] == T_BOOT else "?"
             hz = struct.unpack_from("<H", r, 10)[0] if r[0] == T_BOOT else 0
-            sessions.append({"build": build, "log_hz": hz, "state": [], "event": []})
+            ver = r[1] if r[0] == T_BOOT else 1
+            sessions.append({"build": build, "log_hz": hz, "ver": ver, "state": [], "event": [], "aux": []})
             if r[0] == T_BOOT:
                 continue
         s = sessions[-1]
@@ -56,26 +57,42 @@ def decode(raw: bytes, outdir: str) -> None:
             q = [v / 32767 for v in struct.unpack_from("<4h", r, 10)]
             w = [v / 10 for v in struct.unpack_from("<3h", r, 18)]
             a = [v / 100 for v in struct.unpack_from("<3h", r, 24)]
-            b = [v / 100 for v in struct.unpack_from("<3h", r, 30)]
             f = [v / 127 for v in struct.unpack_from("<4b", r, 36)]
             loop_us, faults = struct.unpack_from("<HH", r, 40)
             ph = PHASES[r[1]] if r[1] < len(PHASES) else str(r[1])
             md = MODES[r[2]] if r[2] < len(MODES) else str(r[2])
-            s["state"].append([t_us / 1e6, ph, md, r[3], *q, *w, *a, *b, *f, loop_us, f"{faults:04X}"])
+            if s["ver"] >= 2:      # ADR-004: h, v_up, q_hat, trim replace the bias
+                h, vz = struct.unpack_from("<hh", r, 30); qb = struct.unpack_from("<H", r, 34)[0] * 2
+                trim = struct.unpack_from("<h", r, 44)[0] / 1e4
+                x = [h / 10, vz / 100, qb, trim]
+            else:
+                x = [v / 100 for v in struct.unpack_from("<3h", r, 30)] + [""]
+            s["state"].append([t_us / 1e6, ph, md, r[3], *q, *w, *a, *x, *f, loop_us, f"{faults:04X}"])
+        elif r[0] == T_AUX:
+            b = [v / 100 for v in struct.unpack_from("<3h", r, 10)]
+            alt = struct.unpack_from("<h", r, 16)[0]
+            dropped, wcet, fails = struct.unpack_from("<IHH", r, 20)
+            ph = PHASES[r[1]] if r[1] < len(PHASES) else str(r[1])
+            s["aux"].append([t_us / 1e6, ph, r[2], r[3], *b, alt, r[18] / 10, r[19], dropped, wcet, fails])
         else:
             arg0, arg1 = struct.unpack_from("<II", r, 12)
             text = r[20:46].split(b"\0")[0].decode("ascii", "replace")
             ph = PHASES[r[2]] if r[2] < len(PHASES) else str(r[2])
             s["event"].append([t_us / 1e6, ph, r[1], arg0, arg1, text])
     hdr_s = ["t_s", "phase", "mode", "flags", "q0", "q1", "q2", "q3", "wx_dps", "wy_dps", "wz_dps",
-             "ax_ms2", "ay_ms2", "az_ms2", "bx_dps", "by_dps", "bz_dps", "fin0", "fin1", "fin2", "fin3",
+             "ax_ms2", "ay_ms2", "az_ms2", "x0", "x1", "x2", "x3", "fin0", "fin1", "fin2", "fin3",
              "loop_us", "faults"]
     hdr_e = ["t_s", "phase", "code", "arg0", "arg1", "text"]
+    hdr_a = ["t_s", "phase", "nav_flags", "sats", "bx_dps", "by_dps", "bz_dps", "gps_alt_m", "hdop", "mode",
+             "log_dropped", "loop_us", "imu_fails"]
     for i, s in enumerate(sessions, 1):
         with open(os.path.join(outdir, f"session{i}_state.csv"), "w", newline="") as fh:
             w = csv.writer(fh); w.writerow(hdr_s); w.writerows(s["state"])
         with open(os.path.join(outdir, f"session{i}_events.csv"), "w", newline="") as fh:
             w = csv.writer(fh); w.writerow(hdr_e); w.writerows(s["event"])
+        if s["aux"]:
+            with open(os.path.join(outdir, f"session{i}_aux.csv"), "w", newline="") as fh:
+                w = csv.writer(fh); w.writerow(hdr_a); w.writerows(s["aux"])
         print(f"session {i}: build '{s['build']}', {s['log_hz']} Hz, "
               f"{len(s['state'])} state, {len(s['event'])} events")
     print(f"{len(sessions)} session(s), {bad} bad record(s) -> {outdir}")

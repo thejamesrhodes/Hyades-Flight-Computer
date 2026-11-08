@@ -203,3 +203,5 @@ void Fw_Task(void)
         break;
     }
 }
+
+uint8_t *Fw_StageBuffer(void) { return s_stage; }

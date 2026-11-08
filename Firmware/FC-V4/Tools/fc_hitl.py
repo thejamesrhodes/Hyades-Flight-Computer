@@ -30,6 +30,7 @@ import json
 import math
 import os
 import struct
+import re
 import sys
 import time
 
@@ -49,6 +50,18 @@ REPLY_FIELDS = ("idx", "phase", "mode", "faults", "loop_us", "nav_flags", "hitl_
 NAV_F_INIT, NAV_F_SAT, NAV_F_GPS_AIDED = 1, 2, 4
 SF_FAIL = 1
 MOTORS = {"I205W": "or_sim2_I205W.csv", "G79W": "or_sim1_G79W.csv"}
+
+
+def _board_frame_hz() -> int:
+    """FRAME_HZ from Core/Inc/board.h, so the host steps the world by the board's frame."""
+    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Core", "Inc", "board.h")
+    with open(p, encoding="utf-8") as f:
+        m = re.search(r"#define\s+FRAME_HZ\s+(\d+)u", f.read())
+    return int(m.group(1)) if m else 100
+
+
+FRAME_HZ = _board_frame_hz()
+FRAME_DT = 1.0 / FRAME_HZ
 
 
 def frame(msg_id: int, payload: bytes) -> bytes:
@@ -189,12 +202,12 @@ def run(args) -> dict:
     phase_t: dict[str, float] = {}
     pre_ign: list[str] = []
     ignite_at = None
-    max_frames = args.frames if args.mode == "static" else int((args.pad_max + 400.0) * 100)
+    max_frames = args.frames if args.mode == "static" else int((args.pad_max + 400.0) * FRAME_HZ)
     landed_t = None
     try:
         while idx < max_frames:
-            veh.frame(fin)
-            t_world += 0.01
+            veh.frame(fin, FRAME_DT)
+            t_world += FRAME_DT
             nmea = veh.gps_bytes(t_world) if args.gps else b""
             acc, gyr, flags = veh.imu.out_a.copy(), veh.imu.out_g.copy(), 0
             tf = veh.t if veh.ignited else -1e9
@@ -319,7 +332,7 @@ def summarise(rows, hdr, phase_t, veh, motor, n_sent, timeouts, wall, psrc, args
                      "p_final_coast_mean_dps": round(float(pt[fl][-100:].mean()), 2),
                      "fin_cmd_sat_frac": round(float(np.mean(np.abs(fins) >= 11.99)), 3),
                      "fin_cmd_max_deg": round(float(np.abs(fins).max()), 2),
-                     "roll_revs": round(float(np.sum(pt[fl]) * 0.01 / 360.0), 2)}
+                     "roll_revs": round(float(np.sum(pt[fl]) * FRAME_DT / 360.0), 2)}
     sat = np.array(a["nav_flags"]) & NAV_F_SAT
     s["nav_saturated_frames"] = int((sat > 0).sum())
     gps = np.array(a["nav_flags"]) & NAV_F_GPS_AIDED

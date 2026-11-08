@@ -1,0 +1,175 @@
+{
+ "n": 90,
+ "variant": "-DCTRL_ROLL_C=15.0f -DCTRL_TRIM_BAND_K=0.3f -DCTRL_TRIM_QSCHED=1 -DCTRL_ROLL_Q_MIN=1000.0f -DCTRL_TRIM_CLAMP=0.1047f",
+ "shadow": false,
+ "fault": "",
+ "n_gear": 1.0,
+ "wind_max": 8.0,
+ "pass": {
+  "R1_sequence": 100.0,
+  "R2_liftoff_le_0.35s": 100.0,
+  "R3_apogee_-0.5_+1.5s": 100.0,
+  "R4a_landing_never_early": 100.0,
+  "R4b_landing_latency": 100.0,
+  "R6_lockin_ratio_le_0.7": 97.8,
+  "R9_qhat_rms_le_25pct": 100.0,
+  "R5a_roll_max_le_360dps": 98.9,
+  "R5b_coast_rms_le_60dps": 98.9,
+  "R8_sat_le_5pct": 100.0
+ },
+ "pct": {
+  "p_max_boost": {
+   "p50": 101.8,
+   "p95": 247.9,
+   "p99": 332.856,
+   "max": 528.3
+  },
+  "p_max_coast": {
+   "p50": 60.8,
+   "p95": 151.2,
+   "p99": 237.06,
+   "max": 456.0
+  },
+  "p_rms_coast": {
+   "p50": 22.8,
+   "p95": 39.72,
+   "p99": 64.447,
+   "max": 124.7
+  },
+  "aoa_max": {
+   "p50": 18.605,
+   "p95": 57.673,
+   "p99": 69.671,
+   "max": 70.49
+  },
+  "qalpha_max": {
+   "p50": 6596.5,
+   "p95": 11319.9,
+   "p99": 16820.37,
+   "max": 18304.0
+  },
+  "nlat_max": {
+   "p50": 0.31,
+   "p95": 0.561,
+   "p99": 0.653,
+   "max": 0.68
+  },
+  "defl_max": {
+   "p50": 2.77,
+   "p95": 5.85,
+   "p99": 6.935,
+   "max": 8.03
+  },
+  "sat_frac": {
+   "p50": 0.0,
+   "p95": 0.0,
+   "p99": 0.0,
+   "max": 0.0
+  },
+  "qhat_rms": {
+   "p50": 3.43,
+   "p95": 10.115,
+   "p99": 13.026,
+   "max": 16.88
+  },
+  "pcan_max": {
+   "p50": 145.5,
+   "p95": 677.65,
+   "p99": 759.84,
+   "max": 888.0
+  },
+  "can_pitch_ratio": {
+   "p50": 0.16,
+   "p95": 0.586,
+   "p99": 0.851,
+   "max": 0.86
+  },
+  "impact_g": {
+   "p50": 32.85,
+   "p95": 40.03,
+   "p99": 42.47,
+   "max": 48.7
+  },
+  "apogee": {
+   "p50": 390.15,
+   "p95": 535.775,
+   "p99": 555.305,
+   "max": 613.6
+  },
+  "q_max": {
+   "p50": 5341.0,
+   "p95": 8426.45,
+   "p99": 8693.44,
+   "max": 8697.0
+  },
+  "mach_max": {
+   "p50": 0.278,
+   "p95": 0.349,
+   "p99": 0.354,
+   "max": 0.354
+  },
+  "wlat_max": {
+   "p50": 68.9,
+   "p95": 190.62,
+   "p99": 227.964,
+   "max": 239.0
+  }
+ },
+ "by_motor": {
+  "G40W": {
+   "all_pass_pct": 100.0,
+   "apogee_p50": 383.7,
+   "q_max_p95": 5015.0,
+   "p_rms_coast_p95": 31.0,
+   "p_max_p95": 226.8
+  },
+  "G53FJ": {
+   "all_pass_pct": 93.3,
+   "apogee_p50": 333.7,
+   "q_max_p95": 4663.0,
+   "p_rms_coast_p95": 33.4,
+   "p_max_p95": 220.1
+  },
+  "G79W": {
+   "all_pass_pct": 100.0,
+   "apogee_p50": 422.6,
+   "q_max_p95": 6578.0,
+   "p_rms_coast_p95": 38.8,
+   "p_max_p95": 216.4
+  },
+  "G80T": {
+   "all_pass_pct": 100.0,
+   "apogee_p50": 520.0,
+   "q_max_p95": 8694.0,
+   "p_rms_coast_p95": 39.1,
+   "p_max_p95": 204.0
+  },
+  "G77R": {
+   "all_pass_pct": 100.0,
+   "apogee_p50": 408.6,
+   "q_max_p95": 7287.0,
+   "p_rms_coast_p95": 42.0,
+   "p_max_p95": 255.1
+  },
+  "G104T": {
+   "all_pass_pct": 93.3,
+   "apogee_p50": 330.9,
+   "q_max_p95": 5111.0,
+   "p_rms_coast_p95": 63.0,
+   "p_max_p95": 355.5
+  }
+ },
+ "all_pass_pct": 97.8,
+ "fail_seeds": {
+  "R6_lockin_ratio_le_0.7": [
+   101004,
+   501000
+  ],
+  "R5a_roll_max_le_360dps": [
+   501000
+  ],
+  "R5b_coast_rms_le_60dps": [
+   501000
+  ]
+ }
+}

@@ -70,13 +70,21 @@ void Nav_Step(Nav *n, const float q[4], const float f[3], const float w[3], floa
         n->g_ref = n->g_sum / (float)n->g_n;
         n->flags |= NAV_F_INIT | NAV_F_STILL;
         n->flags &= ~(NAV_F_SAT | NAV_F_GPS_AIDED);
+        n->sat_count = 0u;
         pad_zero(n);
         n->a_up = 0.0f;
         update_q(n);
         return;
     }
     n->flags &= ~NAV_F_STILL;
-    if (clipped) { n->flags |= NAV_F_SAT; }
+    if (clipped) {
+        /* Isolated clipped frames (vibration peaks on a high-thrust motor) cost
+         * at most overshoot x dt each; only a sustained or repeated clip makes
+         * the integrated velocity untrustworthy (SITL MC-01: a one-frame rule
+         * sent 2 % of G104T flights to the apogee timer, 7 s late). */
+        if (n->sat_count < 0xFFFFu) { n->sat_count++; }
+        if (n->sat_count > n->c.sat_budget_n) { n->flags |= NAV_F_SAT; }
+    }
 
     float a[3];
     v3_copy(fn, a);

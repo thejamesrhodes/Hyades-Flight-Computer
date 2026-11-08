@@ -33,4 +33,7 @@ void PWM_SetFin(uint8_t fin_idx, float norm);
 /* Centre all fins (failsafe / inactive). */
 void PWM_CentreFins(void);
 
+/* Start the next pulse on all channels now (frame-synchronous servo update). */
+void PWM_Commit(void);
+
 #endif /* PWM_H_ */

@@ -14,7 +14,7 @@ static LogState sample(void)
     s.q[0] = 0.7071f; s.q[1] = 0.0f; s.q[2] = -0.7071f; s.q[3] = 0.001f;
     s.w_dps[0] = 12.34f; s.w_dps[1] = -250.0f; s.w_dps[2] = 0.05f;
     s.a_ms2[0] = 0.12f; s.a_ms2[1] = -9.81f; s.a_ms2[2] = 150.0f;
-    s.bias_dps[0] = 0.25f; s.bias_dps[1] = -1.5f; s.bias_dps[2] = 0.0f;
+    s.h_m = 1234.5f; s.v_up = -12.34f; s.qbar_pa = 41876.0f; s.trim_rad = -0.0523f;
     s.fin[0] = 1.0f; s.fin[1] = -1.0f; s.fin[2] = 0.5f; s.fin[3] = -0.25f;
     s.loop_us = 1160u; s.faults = 0x0081u;
     return s;
@@ -37,9 +37,12 @@ static void test_state_roundtrip_within_quantisation(void)
     for (int i = 0; i < 3; i++) {
         TEST_ASSERT_FLOAT_WITHIN(0.051f,  in.w_dps[i],    out.w_dps[i]);
         TEST_ASSERT_FLOAT_WITHIN(0.0051f, in.a_ms2[i],    out.a_ms2[i]);
-        TEST_ASSERT_FLOAT_WITHIN(0.0051f, in.bias_dps[i], out.bias_dps[i]);
     }
     for (int i = 0; i < 4; i++) { TEST_ASSERT_FLOAT_WITHIN(0.5f/127.0f, in.fin[i], out.fin[i]); }
+    TEST_ASSERT_FLOAT_WITHIN(0.051f, in.h_m, out.h_m);
+    TEST_ASSERT_FLOAT_WITHIN(0.0051f, in.v_up, out.v_up);
+    TEST_ASSERT_FLOAT_WITHIN(1.01f, in.qbar_pa, out.qbar_pa);
+    TEST_ASSERT_FLOAT_WITHIN(0.51e-4f, in.trim_rad, out.trim_rad);
     TEST_ASSERT_EQUAL_UINT16(in.loop_us, out.loop_us);
     TEST_ASSERT_EQUAL_UINT16(in.faults, out.faults);
 }
