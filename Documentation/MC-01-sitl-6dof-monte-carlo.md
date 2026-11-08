@@ -22,7 +22,7 @@ All in double precision, 0.25 ms steps in ascent and 1 ms in descent.
 |---|---|---|
 | Rigid body | Forward body 6DOF with quaternion attitude. The can's angular momentum is in the Euler equations (gyroscopic coupling). | — |
 | Fin can | 1 roll DOF. Driven by fin cant aero (strip theory Cl_δ 8.75, Cl_p −17.3); coupled to the body by bearing friction T = T_c·tanh(slip/0.5) + c_v·slip. | Free-Spinning Fin Can spec; `rollopt.py` strip theory |
-| Mass, CG, inertia | Dry 773.6 g at 0.428 m; motor at 0.827 m; transverse I from OpenRocket with parallel-axis motor changes; forward-body Ixx 2.2e-4. | OpenRocket "62mm Canard Control V1.0.0" export |
+| Mass, CG, inertia | Dry 773.6 g at **0.401 m**; motor at **0.835 m**; dry I_t **0.053** (corrected 9 Nov, LD-01 §2; previously 0.428 / 0.827 / 0.065); transverse I from OpenRocket with parallel-axis motor changes; forward-body Ixx 2.2e-4. | OpenRocket "62mm Canard Control V1.0.0" export |
 | Drag | Cd(Mach) along the air-relative velocity. | OpenRocket (`aero.csv`) |
 | Normal force | Total CN_α 11.8 /rad and CP(Mach) from OpenRocket, less the canards' share. | Barrowman check: nose 2.0 + canards 0.91 + fins 8.47 = 11.4 |
 | Pitch damping | Nose and rear fins see α_local = ω × r. | Barrowman components |
@@ -58,9 +58,9 @@ Status codes:
 | ID | Quantity | Nominal | MC dispersion | Status | Source / how to close |
 |---|---|---|---|---|---|
 | A1 | Forward-body roll inertia Ixx | 2.2e-4 kg m² | ×U(0.68, 1.6) | D | OpenRocket 4.78e-4 less can 2.6e-4. OpenRocket fin mass is overridden (6 g for 4 fins). **Trifilar pendulum.** |
-| A2 | Transverse inertia I_t | 0.065 dry (0.073 with G79W) | ×N(1, 0.10) | D | OpenRocket. **Bifilar pendulum.** |
+| A2 | Transverse inertia I_t | 0.053 dry (0.073 with G79W; corrected 9 Nov) | ×N(1, 0.10) | D | OpenRocket. **Bifilar pendulum.** |
 | A3 | Can roll inertia I_can | 2.6e-4 | U(1.5, 3.0)e-4 | D | Fin can spec. |
-| A4 | Mass and CG | 773.6 g, 0.428 m | ×N(1, 0.03); CG ±N(0, 10 mm) | D | OpenRocket. **Weigh and balance.** |
+| A4 | Mass and CG | 773.6 g, 0.401 m (corrected 9 Nov) | ×N(1, 0.03); CG ±N(0, 10 mm) | D | OpenRocket. **Weigh and balance.** |
 | A5 | Cd | OpenRocket | ×N(1, 0.10) | D | — |
 | A6 | CN_α, CP | 11.8 /rad, OpenRocket CP | ×N(1, 0.10); CP ±N(0, 10 mm) | D | Barrowman cross-check (§1.2). |
 | A7 | Canard Cl_δ | 0.657 /rad | ×U(0.7, 1.3) | D | CDS-01; strip theory. Flight data later. |
@@ -101,6 +101,13 @@ Status codes:
 | R9 | q̂ RMS error ≤ 25 % | Inside the ±30 % gain uncertainty the loop was designed for |
 
 ## 4. Results
+
+> **Revision, 9 Nov.** The plant's dry CG was 2.2 cm too far aft (LD-01 §2). All campaigns below were re-run with the corrected plant; the results are in **LD-01 §3**:
+> - active, build tolerance: **99.8 %** (2 corner flights miss the tightened R5, decision pending, LD-01 §3.2);
+> - wide tolerance 95.1 %; shadow 96.5 %; hard-over 25.8 %, still no pitch-over;
+> - lock-in maxima fell to 0.42 / 0.41.
+>
+> The tables below are the 8 Nov results, kept for traceability.
 
 The final firmware includes dither, boost, the torque trim and the STM-01 fixes. 7 680 flights in total.
 
@@ -184,6 +191,6 @@ python mc_figures.py
 - Linear aero to stall.
 - No rail friction or tip-off.
 - Vibration is synthetic (A24).
-- Recovery dynamics are simplified: ejection forces, line stretch and inflation loads are Phase 2.
-- Structural loads are reported only as q·α and lateral load factor; Phase 2 adds bending moments.
+- Recovery dynamics in the 6DOF are simplified. Ejection, cord and inflation loads are in REC-01.
+- Structural loads (bending, axial, shear at 6 stations) are in LD-01.
 - The motor shortlist excludes anything above 14 g by design.

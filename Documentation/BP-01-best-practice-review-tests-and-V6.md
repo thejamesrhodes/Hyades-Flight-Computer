@@ -102,9 +102,9 @@ The numbers are V6 requirements derived from this analysis **[inference]**; chec
 |---|---|---|
 | V6-1 (not adopted) | **Can spin sensor**: a magnet on the fin can and a hall sensor on the body ring, about 1 timer input. | Gives the slip rate, so friction-torque feedforward becomes possible (MC-01 FM4) and lock-in can be monitored directly (R6) instead of inferred. |
 | V6-2 (not adopted) | **Servo position feedback or current sense per channel.** Use servos with feedback, tap the pot, or fit INA-type current shunts. | Hard-over detection (MC-01 FM9, the only failure the loop cannot contain). It also confirms polarity on the pad (FDS-01 §6.6). |
-| V6-3 **(adopted)** | **IMU log at ≥ 1 kHz to SD** for boost and coast (FDS-01 Tier 1). | The vibration environment (§3) and replay of the estimator. |
+| V6-3 **(adopted)** | **IMU log at ≥ 1 kHz to SD** for boost and coast, and **through apogee + 5 s** to capture deployment (REC-01 §7). | The vibration environment (§3), replay of the estimator, and the recovery shock (15–20 ms snatch pulses). |
 | V6-4 | **Pre-trigger ring in backup SRAM** (4 KB is too small for 2.5 s at 100 Hz × 48 B = 12 KB). Use the backup SRAM for the ring index and last-flush marker, with the ring in DTCM, or log fewer bytes. | Keeps the pre-trigger data across an in-flight reset. |
-| V6-5 **(adopted)** | **High-g accelerometer** (±100–200 g, low rate) alongside the ±16 g IMU. | Only if motors beyond the 14 g shortlist are flown. Also captures the deployment and landing shock for the Phase 2 recovery loads. |
+| V6-5 **(adopted)** | **High-g accelerometer, ±200 g**, sampled at ≥ 1 kHz in the deployment window, alongside the ±16 g IMU. | REC-01: snatch up to 156 g with the current Kevlar cord (37 g with the recommended cord); landing p99 49 g (LD-01). Also covers motors beyond the shortlist. |
 | V6-6 | **Synchronous servo timers** (one advanced timer for all four channels, with the update event started by software as on FC-V4). | Keeps the ADR-004 delay budget. |
 | V6-7 | **Servo rail sensing** (ADC on the 2S rail under load). | Servo slew scales with voltage (MC-01 A21); a monitor instance can flag sag. |
 | V6-8 | **200 Hz frame minimum.** The H743 can run 400–500 Hz with SPI DMA IMU reads. Keep the servo frame ≤ 333 Hz. | More rate buys little once the 14 ms servo delay dominates (ADR-004 §2). |

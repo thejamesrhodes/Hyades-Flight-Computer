@@ -208,5 +208,8 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
 - ~~Flight 1 mode~~: **decided 8 Nov: full rate law** (zero-rate target, no angle hold; `CFG_CTRL_SHADOW 0`).
 - Requirements tightened (MC-01 §3): peak ≤ 240 °/s, coast RMS ≤ 45 °/s, lock-in ≤ 0.6. The flight configuration passes 1 200 / 1 200.
 - V6: ≥ 1 kHz IMU to SD and a high-g accelerometer adopted (BP-01 §5).
-- Phase 2 (agreed): 6DOF structural loads, and recovery for motor ejection with a single chute.
+- ~~Phase 2~~: done 9 Nov. Results:
+  - LD-01: flight loads, a mass-property correction to the SITL, and the re-run of every MC-01 campaign;
+  - REC-01: ejection, cord and parachute sizing.
+- **Open:** 2 / 1 200 corner flights miss the tightened R5 with the corrected plant (LD-01 §3.2). Decision pending.
 - Set `DET_T_APOGEE_MAX_S` on the pre-flight sheet once the motor is chosen.
