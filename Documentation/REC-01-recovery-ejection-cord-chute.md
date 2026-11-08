@@ -1,6 +1,6 @@
 # REC-01: recovery sub-simulation (motor ejection, single chute): ejection, separation, shock cord and parachute loads, and sizing
 
-**Date:** 9 November 2026. Phase 2, as agreed at the 8 Nov checkpoint (James: "Motor ejection, single chute").
+**Date:** 8 November 2026. Phase 2, as agreed at the 8 Nov checkpoint (James: "Motor ejection, single chute").
 **Tools:** `Firmware/FC-V4/Tools/recovery/`:
 - `rec.py` (model and Monte Carlo);
 - `rec_campaign.sh`, `rec_campaign2.sh` (campaigns);

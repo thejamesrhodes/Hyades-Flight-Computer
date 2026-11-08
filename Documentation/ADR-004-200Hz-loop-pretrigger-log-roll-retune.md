@@ -157,7 +157,7 @@ Two SITL findings drove the details:
 - 10 s of stillness fired under a calm canopy, so it became 30 s.
 - A deployment shock after a motor delay latched "touchdown", so the minimum became 15 s.
 
-MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now lands at 33.8 s on the board clock instead of the 300 s timer.
+MC-01: R4a "never early" passed in 7 680 of 7 680 flights, and in 3 840 of 3 840 in the LD-01 re-run with corrected mass properties. HITL `gps_none` now lands at 33.8 s on the board clock instead of the 300 s timer.
 
 ## 6. Flight core extracted; SITL
 
@@ -182,8 +182,8 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
 | Host unit tests | 12 suites, **all pass**. New: `test_logq` (4), `test_flight` (7), `test_dither` (3), `test_saturation_budget`; existing tests updated for STM-01 F3 and log v2. |
 | ARM build | 0 errors, 0 warnings (−Werror, the full design-guideline warning set). |
 | MATLAB cross-check | Matches the Python port (§3.1). |
-| SITL vs OpenRocket | G79W apogee 432.7 m vs 439 m (3 m/s wind, 3° rail tilt in SITL); t_apogee 9.59 vs 9.66 s. I205W 1 291.6 vs 1 303 m. |
-| SITL Monte Carlo | Final build including dither, build tolerances met: **1 200 / 1 200 flights pass R1–R9**. Coast roll RMS p95 22 °/s; peak p95 112 °/s. Full campaign set in MC-01. |
+| SITL vs OpenRocket | G79W apogee 432.7 m vs 439 m (3 m/s wind, 3° rail tilt in SITL); t_apogee 9.59 vs 9.66 s. After the LD-01 CG correction: 431.8 m. I205W 1 291.6 vs 1 303 m. |
+| SITL Monte Carlo | Final build including dither, build tolerances met: **1 200 / 1 200 flights pass R1–R9**. Coast roll RMS p95 22 °/s; peak p95 112 °/s. Full campaign set in MC-01. Re-run with corrected mass properties (LD-01 §3): 1 198 / 1 200. |
 | Hardware HITL, 8 Nov | Pre-dither build: 9 / 9 cases OK (nominal, wind 9 m/s + gust, vibration nominal and worst, 25 ms boost dropout, NaN sample, no GPS, pad knock, I205W). **Final build with dither** (`campaign-20261108-103621`): 4 / 4 OK. G79W nominal roll peak 95 °/s (was 105), RMS 29 °/s (was 32), canards ≤ 1.15°, q̂ error 0.9 % RMS, loop p99 329 µs. |
 
 ## 9. Consequences for hardware (V6 / H743 and the airframe)
@@ -194,9 +194,9 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
    - single-fin misalignment ≤ 0.25°;
    - bearing Coulomb torque ≤ 6 mN m (spin-down test).
    
-   MC-01: with these met, 100 % pass. With the wide tolerance (σ_cant 0.25°), 3.2 % cross the lock-in limit.
+   MC-01: with these met, 100 % pass (99.8 % after the LD-01 CG correction, with 2 roll-limit corner cases and no lock-in failures). With the wide tolerance (σ_cant 0.25°), 3.4 % cross the lock-in limit (LD-01 re-run).
 3. **V6 additions** (BP-01 §5; James, 8 Nov):
-   - **adopted:** raw IMU at ≥ 1 kHz to SD; a high-g accelerometer (±100–200 g);
+   - **adopted:** raw IMU at ≥ 1 kHz to SD; a high-g accelerometer (±200 g, REC-01 §7);
    - **proposed:** pre-trigger ring index in H743 backup SRAM, synchronous servo timers, servo rail sensing;
    - **not adopted:** can spin sensor and servo position/current feedback. Their risks are carried by the build tolerances and the gain boost; hard-over stays a residual hazard.
 4. **Linkage ratio n:** in the 6DOF it does not help the roll floor (friction dominates, not the dead band). Keep n = 1 unless the canards are resized.
@@ -206,9 +206,9 @@ MC-01: R4a "never early" passed in 7 680 of 7 680 flights. HITL `gps_none` now l
 - Re-run `optimise_roll_schedule`, `montecarlo_roll_control` and Simulink with c = 15 and the torque-space trim, so the MATLAB suite matches the flight code.
 - ~~Hardware HITL re-run of the dither build~~: done, 4 / 4 OK (§8).
 - ~~Flight 1 mode~~: **decided 8 Nov: full rate law** (zero-rate target, no angle hold; `CFG_CTRL_SHADOW 0`).
-- Requirements tightened (MC-01 §3): peak ≤ 240 °/s, coast RMS ≤ 45 °/s, lock-in ≤ 0.6. The flight configuration passes 1 200 / 1 200.
+- Requirements tightened (MC-01 §3): peak ≤ 240 °/s, coast RMS ≤ 45 °/s, lock-in ≤ 0.6. The flight configuration passed 1 200 / 1 200 on 8 Nov. After the LD-01 CG correction it passes 1 198 / 1 200.
 - V6: ≥ 1 kHz IMU to SD and a high-g accelerometer adopted (BP-01 §5).
-- ~~Phase 2~~: done 9 Nov. Results:
+- ~~Phase 2~~: done 8 Nov. Results:
   - LD-01: flight loads, a mass-property correction to the SITL, and the re-run of every MC-01 campaign;
   - REC-01: ejection, cord and parachute sizing.
 - **Open:** 2 / 1 200 corner flights miss the tightened R5 with the corrected plant (LD-01 §3.2). Decision pending.
