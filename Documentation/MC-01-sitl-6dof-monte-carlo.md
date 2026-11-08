@@ -22,7 +22,7 @@ All in double precision, 0.25 ms steps in ascent and 1 ms in descent.
 |---|---|---|
 | Rigid body | Forward body 6DOF with quaternion attitude. The can's angular momentum is in the Euler equations (gyroscopic coupling). | — |
 | Fin can | 1 roll DOF. Driven by fin cant aero (strip theory Cl_δ 8.75, Cl_p −17.3); coupled to the body by bearing friction T = T_c·tanh(slip/0.5) + c_v·slip. | Free-Spinning Fin Can spec; `rollopt.py` strip theory |
-| Mass, CG, inertia | Dry 773.6 g at **0.401 m**; motor at **0.835 m**; dry I_t **0.053** (corrected 9 Nov, LD-01 §2; previously 0.428 / 0.827 / 0.065); transverse I from OpenRocket with parallel-axis motor changes; forward-body Ixx 2.2e-4. | OpenRocket "62mm Canard Control V1.0.0" export |
+| Mass, CG, inertia | Dry 773.6 g at **0.401 m**; motor at **0.835 m**; dry I_t **0.053** (corrected 8 Nov, LD-01 §2; previously 0.428 / 0.827 / 0.065); transverse I from OpenRocket with parallel-axis motor changes; forward-body Ixx 2.2e-4. | OpenRocket "62mm Canard Control V1.0.0" export |
 | Drag | Cd(Mach) along the air-relative velocity. | OpenRocket (`aero.csv`) |
 | Normal force | Total CN_α 11.8 /rad and CP(Mach) from OpenRocket, less the canards' share. | Barrowman check: nose 2.0 + canards 0.91 + fins 8.47 = 11.4 |
 | Pitch damping | Nose and rear fins see α_local = ω × r. | Barrowman components |
@@ -41,7 +41,7 @@ All in double precision, 0.25 ms steps in ascent and 1 ms in descent.
 
 | Check | Result |
 |---|---|
-| G79W, 3 m/s wind, 3° rail | Apogee 432.7 m vs OpenRocket 439 m (OpenRocket wind about 2 m/s); t_apogee 9.59 vs 9.66 s. |
+| G79W, 3 m/s wind, 3° rail | Apogee 431.8 m (432.7 m before the LD-01 CG correction) vs OpenRocket 439 m (OpenRocket wind about 2 m/s); t_apogee 9.59 vs 9.66 s. |
 | I205W | 1 291.6 vs 1 303 m. |
 | Same flight code on hardware HITL (G79W nominal) | SITL roll p_max 60–120 °/s against HITL 105 °/s, canards about 1° in both. Same q̂ behaviour. |
 | Linear margins vs nonlinear SITL | c sweep: the linear edge (c ≈ 22) is benign in SITL because saturation masks it. That's why the gains are chosen on margins (ADR-004 §3.2). |
@@ -58,9 +58,9 @@ Status codes:
 | ID | Quantity | Nominal | MC dispersion | Status | Source / how to close |
 |---|---|---|---|---|---|
 | A1 | Forward-body roll inertia Ixx | 2.2e-4 kg m² | ×U(0.68, 1.6) | D | OpenRocket 4.78e-4 less can 2.6e-4. OpenRocket fin mass is overridden (6 g for 4 fins). **Trifilar pendulum.** |
-| A2 | Transverse inertia I_t | 0.053 dry (0.073 with G79W; corrected 9 Nov) | ×N(1, 0.10) | D | OpenRocket. **Bifilar pendulum.** |
+| A2 | Transverse inertia I_t | 0.053 dry (0.073 with G79W; corrected 8 Nov) | ×N(1, 0.10) | D | OpenRocket. **Bifilar pendulum.** |
 | A3 | Can roll inertia I_can | 2.6e-4 | U(1.5, 3.0)e-4 | D | Fin can spec. |
-| A4 | Mass and CG | 773.6 g, 0.401 m (corrected 9 Nov) | ×N(1, 0.03); CG ±N(0, 10 mm) | D | OpenRocket. **Weigh and balance.** |
+| A4 | Mass and CG | 773.6 g, 0.401 m (corrected 8 Nov) | ×N(1, 0.03); CG ±N(0, 10 mm) | D | OpenRocket. **Weigh and balance.** |
 | A5 | Cd | OpenRocket | ×N(1, 0.10) | D | — |
 | A6 | CN_α, CP | 11.8 /rad, OpenRocket CP | ×N(1, 0.10); CP ±N(0, 10 mm) | D | Barrowman cross-check (§1.2). |
 | A7 | Canard Cl_δ | 0.657 /rad | ×U(0.7, 1.3) | D | CDS-01; strip theory. Flight data later. |
@@ -93,8 +93,8 @@ Status codes:
 | R3 | Apogee detected within −0.5 / +1.5 s of truth | Recovery timing (Phase 2) |
 | R4a | LANDED **never** before touchdown | Data and beacon safety |
 | R4b | LANDED ≤ 15 s after touchdown (≤ 40 s with no GPS), or ≤ 5 s (≤ 35 s) after coming to rest | Operations |
-| R5a | \|p\| ≤ **240 °/s** at all times in active flight (was 360) | Tightened to the verified maximum (222 °/s) plus margin |
-| R5b | Coast roll-rate RMS ≤ **45 °/s** (was 60) | Verified maximum 43.7 °/s |
+| R5a | \|p\| ≤ **240 °/s** at all times in active flight (was 360) | Tightened to the verified maximum (222 °/s) plus margin. With the corrected plant one flight reaches 253 °/s; decision pending (LD-01 §3.2). |
+| R5b | Coast roll-rate RMS ≤ **45 °/s** (was 60) | Verified maximum 43.7 °/s. With the corrected plant one flight reaches 46.1 °/s; decision pending (LD-01 §3.2). |
 | R6 | Max \|body roll\| / ω_pitch ≤ **0.6**, and max \|can spin\| / ω_pitch ≤ **0.6** (was 0.7) | Lock-in margin; verified maxima 0.45 / 0.58 |
 | G1, G2 | **Statistical goals:** p95 peak \|p\| ≤ 120 °/s; p95 coast RMS ≤ 25 °/s | Verified 112 / 22 °/s |
 | R8 | Canard command saturated ≤ 5 % of the time | Authority margin |
@@ -102,7 +102,7 @@ Status codes:
 
 ## 4. Results
 
-> **Revision, 9 Nov.** The plant's dry CG was 2.2 cm too far aft (LD-01 §2). All campaigns below were re-run with the corrected plant; the results are in **LD-01 §3**:
+> **Revision, 8 Nov (later).** The plant's dry CG was 2.2 cm too far aft (LD-01 §2). All campaigns below were re-run with the corrected plant; the results are in **LD-01 §3**:
 > - active, build tolerance: **99.8 %** (2 corner flights miss the tightened R5, decision pending, LD-01 §3.2);
 > - wide tolerance 95.1 %; shadow 96.5 %; hard-over 25.8 %, still no pitch-over;
 > - lock-in maxima fell to 0.42 / 0.41.

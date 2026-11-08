@@ -1,6 +1,6 @@
 # LD-01: Flight structural loads from the 6DOF Monte Carlo, mass-property correction, and the physical test plan
 
-**Date:** 9 November 2026. Phase 2 of the ADR-004 / MC-01 work (agreed at the 8 Nov checkpoint).
+**Date:** 8 November 2026. Phase 2 of the ADR-004 / MC-01 work (agreed at the 8 Nov checkpoint).
 **Companion:** REC-01 (ejection, shock cord and parachute loads).
 **Tools:**
 - `Tools/sitl/sitl.c` (loads model, `loads_init` / `loads_eval`);
