@@ -14,7 +14,7 @@
   "R3_apogee_-0.5_+1.5s": 100.0,
   "R4a_landing_never_early": 100.0,
   "R4b_landing_latency": 100.0,
-  "R6_lockin_ratio_le_0.7": 94.7,
+  "R6_lockin_ratio_le_0.6": 93.2,
   "R9_qhat_rms_le_25pct": 100.0
  },
  "pct": {
@@ -165,7 +165,7 @@
    "p_max_p95": 404.3
   }
  },
- "all_pass_pct": 94.7,
+ "all_pass_pct": 93.2,
  "fail_seeds": {
   "R6_lockin_ratio_le_0.7": [
    9004,
@@ -179,5 +179,9 @@
    209019,
    209047
   ]
+ },
+ "goals": {
+  "p95_peak_le_120": false,
+  "p95_rms_le_25": false
  }
 }
