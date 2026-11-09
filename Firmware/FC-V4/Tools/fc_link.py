@@ -30,7 +30,9 @@ MONITORS = ("imu_read", "accel_rng", "gyro_rng", "loop_time", "overrun", "est_na
 COMMANDS = ("help", "ver", "stream on", "stream off", "faults", "tasks", "gps", "imu",
             "log info", "log start", "log stop", "log erase", "log pull", "reboot",
             "faults clear", "gps raw", "gps probe", "imu capture",
-            "inject wdg", "inject phase", "inject imu")
+            "inject wdg", "inject phase", "inject imu",
+            "cal", "cal begin", "cal jog ", "cal set ", "cal save", "cal cancel")
+FIN_NAMES = ("0 top", "1 right", "2 bottom", "3 left")
 VER_PREFIX = "Hyades FC-V4"
 
 # Binary STATE frame (telemetry.h): AA 55 id len payload crc16(id,len,payload)
@@ -114,7 +116,7 @@ _STATUS = re.compile(
     r"\|a\|=(?P<an>\S+) fin (?P<f0>\S+) (?P<f1>\S+) (?P<f2>\S+) (?P<f3>\S+) "
     r"imu=(?P<imu>\w+)\((?P<imu_fails>\d+)\) loop=(?P<loop>\d+) ovr=(?P<ovr>\d+) "
     r"gps=(?P<gps>\w+) s(?P<sats>\d+) alt=(?P<alt>\S+) rx=(?P<gps_rx>\d+) nmea=(?P<nmea>\d+) "
-    r"log=(?P<log>\d+)%(?: h=(?P<h>\S+) vz=(?P<vz>\S+) q=(?P<qbar>\S+))?")
+    r"log=(?P<log>\d+)%(?: h=(?P<h>\S+) vz=(?P<vz>\S+) q=(?P<qbar>\S+))?(?: cal=(?P<cal>\w+))?")
 _EVENT = re.compile(r"\[EVT\] t=(?P<ms>\d+) ms (?P<phase>\w+): (?P<text>.*)$")
 _BUILD = re.compile(r"build (\S+)")
 _FLOATS = ("roll", "pitch", "yaw", "wx", "wy", "wz", "an", "f0", "f1", "f2", "f3", "alt")
@@ -132,7 +134,29 @@ def parse_status(line: str) -> dict | None:
     out.update({k: int(d[k]) for k in _INTS})
     for k in ("h", "vz", "qbar"):                  # NAV-01 fields (newer firmware)
         out[k] = num(d[k]) if d.get(k) is not None else float("nan")
+    out["cal"] = d.get("cal")                      # CAL-01: OK / NONE / ALIGN (None: older firmware)
     return out
+
+
+_CAL = re.compile(
+    r"^CAL state=(?P<state>\w+) stored=(?P<stored>\w+) seq=(?P<seq>\d+) zero=(?P<zero>\S+) "
+    r"trial=(?P<trial>\S+) journal=(?P<used>\d+)/(?P<slots>\d+) idle_s=(?P<idle>\d+) ready=(?P<ready>\w+)")
+
+
+def parse_cal(line: str) -> dict | None:
+    """The firmware's machine-readable reply to every 'cal' command (CAL-01)."""
+    m = _CAL.search(line)
+    if not m:
+        return None
+    try:
+        zero = [float(v) for v in m["zero"].split(",")]
+        trial = [float(v) for v in m["trial"].split(",")]
+    except ValueError:
+        return None
+    if len(zero) != 4 or len(trial) != 4:
+        return None
+    return {"state": m["state"], "stored": m["stored"], "seq": int(m["seq"]), "zero": zero, "trial": trial,
+            "used": int(m["used"]), "slots": int(m["slots"]), "idle_s": int(m["idle"]), "ready": m["ready"]}
 
 
 def parse_event(line: str) -> dict | None:

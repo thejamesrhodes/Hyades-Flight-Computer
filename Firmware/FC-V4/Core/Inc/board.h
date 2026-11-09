@@ -105,9 +105,9 @@
 #define PWM_TICK_HZ           8000000u
 #endif
 #define PWM_TICKS_PER_US      (PWM_TICK_HZ / 1000000u)
-/* Per-fin mechanical zero, degrees at the servo, measured on the bench (spline
- * indexing and linkage). Applied by the PWM driver in whole ticks. */
-#define FIN_ZERO_OFFSET_DEG   { 0.0f, 0.0f, 0.0f, 0.0f }
+/* The per-fin mechanical zero is not a build constant: it is measured with
+ * the canard alignment session ('cal' commands, CAL-01), stored in the flash
+ * journal (calstore.c) and applied by PWM_SetZeroMdeg in whole ticks. */
 
 /* ----------------------------------------------------------------------------
  * 5. CONTROLLER  —  geometric SO(3) outer loop + INDI inner loop
@@ -343,11 +343,19 @@
  *
  * F411CE flash: sectors 0-3 = 16 KB, 4 = 64 KB, 5-7 = 128 KB. The application
  * is linked into sectors 0-4 (128 KB, STM32F411CEUX_FLASH.ld); the log uses
- * sectors 5-7 (384 KB). A USB firmware update erases only the sectors the new
- * image covers, so the log survives reflashing.
+ * sectors 5-7 (384 KB) after a 4 KB canard-zero calibration journal at the
+ * start of sector 5 (CAL-01, calstore.c). A USB firmware update erases only
+ * the sectors the new image covers, so the log and the calibration survive
+ * reflashing. A log erase wipes sectors 5-7; the calibration is rewritten
+ * from RAM straight after (app.c maintenance()).
  * -------------------------------------------------------------------------- */
-#define LOG_FLASH_BASE        0x08020000u
-#define LOG_FLASH_SIZE        (384u * 1024u)
+#define LOG_REGION_BASE       0x08020000u
+#define LOG_REGION_SIZE       (384u * 1024u)
+#define CAL_FLASH_BASE        LOG_REGION_BASE
+#define CAL_FLASH_SIZE        4096u            /* 128 saves between log erases */
+#define LOG_FLASH_BASE        (CAL_FLASH_BASE + CAL_FLASH_SIZE)
+/* Whole 48-byte records (LOGREC_SIZE, checked in flashlog.c): 8106 = 389 088 B */
+#define LOG_FLASH_SIZE        (((LOG_REGION_SIZE - CAL_FLASH_SIZE) / 48u) * 48u)
 #define LOG_FIRST_SECTOR      5u
 #define LOG_SECTOR_COUNT      3u
 /* Logging (ADR-004 §4): pre-trigger ring in RAM while READY; liftoff commits
@@ -363,6 +371,11 @@
                                       * a premature LANDED under a calm canopy)       */
 #define LOG_MIN_FREE_BYTES    (200u * 1024u) /* READY requires this much erased log */
 #define LOG_AUTOSTART         1      /* 1 = arm the ring on READY (flight default) */
+/* No READY without a valid canard-zero calibration (CAL-01). 0 only for a
+ * bench board that has never been aligned. */
+#ifndef CFG_REQUIRE_FIN_CAL
+#define CFG_REQUIRE_FIN_CAL   1
+#endif
 
 #define APP_FLASH_BASE        0x08000000u
 #define APP_FLASH_SIZE        (128u * 1024u)
@@ -454,6 +467,9 @@
 #if defined(CFG_FLIGHT_BUILD)
 #if (CFG_FLIGHT_BUILD != 0) && ((CFG_HITL != 0) || (CFG_FAULT_INJECTION != 0) || (CFG_BENCH_ACTUATE_READY != 0))
 #error "flight build with a bench feature enabled (CFG_HITL / CFG_FAULT_INJECTION / CFG_BENCH_ACTUATE_READY)"
+#endif
+#if (CFG_FLIGHT_BUILD != 0) && (CFG_REQUIRE_FIN_CAL == 0)
+#error "flight build must require a canard-zero calibration (CFG_REQUIRE_FIN_CAL 1)"
 #endif
 #endif
 

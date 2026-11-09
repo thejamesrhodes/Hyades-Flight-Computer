@@ -11,6 +11,7 @@
 #include "pwm.h"
 #include "board.h"
 #include "alloc.h"
+#include "fincal.h"
 #include <math.h>
 
 extern TIM_HandleTypeDef htim2, htim3;
@@ -37,9 +38,11 @@ static const PWM_Channel fin_chan[FIN_COUNT] = { PWM_CH3, PWM_CH4, PWM_CH5, PWM_
 _Static_assert((PWM_TIM_CLK_HZ % PWM_TICK_HZ) == 0u, "PWM tick must divide the timer clock");
 _Static_assert((PWM_TICK_HZ % 1000000u) == 0u, "PWM tick must be a whole number of ticks per us");
 _Static_assert(PWM_ARR <= 65535u, "TIM3 is 16-bit: servo period too long for this tick");
+#define SERVO_RANGE_DEG_INT   ((int32_t)SERVO_RANGE_DEG)   /* 180: a whole number of degrees */
+_Static_assert(FIN_COUNT == FINCAL_FINS, "one calibrated zero per fin");
 
-/* Per-fin mechanical zero in ticks, set once in PWM_Init (integer afterwards,
- * so PWM_CentreFins stays safe to call from fault handlers). */
+/* Per-fin mechanical zero in ticks (CAL-01). Integer, so PWM_CentreFins stays
+ * safe to call from fault handlers. Written only through PWM_SetZeroMdeg. */
 static int32_t fin_zero_ticks[FIN_COUNT];
 
 void PWM_Init(void)
@@ -73,14 +76,7 @@ void PWM_Init(void)
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
-    static const float zero_deg[FIN_COUNT] = FIN_ZERO_OFFSET_DEG;
-    for (uint32_t i = 0u; i < FIN_COUNT; i++) {
-        /* bench offsets are a few degrees; clamp to +/-10 deg before the cast (std A2) */
-        float z = isfinite(zero_deg[i]) ? zero_deg[i] : 0.0f;
-        if (z > 10.0f) { z = 10.0f; }
-        if (z < -10.0f) { z = -10.0f; }
-        fin_zero_ticks[i] = (int32_t)lroundf(z * ALLOC_US_PER_DEG * (float)PWM_TICKS_PER_US);
-    }
+    for (uint32_t i = 0u; i < FIN_COUNT; i++) { fin_zero_ticks[i] = 0; }   /* calibration applied by the app */
     for (uint32_t i = 0u; i < (uint32_t)PWM_CH_COUNT; i++) { PWM_SetPulse((PWM_Channel)i, SERVO_CENTRE_US); }
     PWM_CentreFins();
 }
@@ -106,6 +102,20 @@ void PWM_SetFin(uint8_t fin_idx, float norm)
 {
     if (fin_idx >= FIN_COUNT) { return; }
     set_ticks(fin_chan[fin_idx], PWM_CENTRE_TICKS + fin_zero_ticks[fin_idx] + Alloc_NormToTicks(norm));
+}
+
+/* Millidegrees at the servo -> ticks, rounded: mdeg x 1200 us / 180 deg x
+ * ticks/us / 1000. |mdeg| <= 10000 keeps every product inside int32. */
+void PWM_SetZeroMdeg(const int16_t mdeg[FIN_COUNT])
+{
+    const int32_t den = (SERVO_RANGE_DEG_INT * 1000);
+    for (uint32_t i = 0u; i < FIN_COUNT; i++) {
+        int32_t m = mdeg[i];
+        if (m > FINCAL_LIMIT_MDEG) { m = FINCAL_LIMIT_MDEG; }
+        if (m < -FINCAL_LIMIT_MDEG) { m = -FINCAL_LIMIT_MDEG; }
+        const int32_t num = m * (int32_t)(SERVO_MAX_US - SERVO_MIN_US) * (int32_t)PWM_TICKS_PER_US;
+        fin_zero_ticks[i] = (num >= 0) ? ((num + (den / 2)) / den) : -(((-num) + (den / 2)) / den);
+    }
 }
 
 /* Integer-only so it is also safe to call from fault handlers. */

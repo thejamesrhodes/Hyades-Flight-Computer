@@ -300,6 +300,10 @@ class App:
         self.plot_freeze_t = 0.0
         self.fault_list: list[str] = []
         self.ev_phase: str | None = None
+        self.cal: dict | None = None            # last 'CAL ...' reply (CAL-01)
+        self.cal_t = 0.0
+        self.cal_warned = False
+        self.cal_query_t = 0.0
 
         self._fonts()
         self._build()
@@ -400,14 +404,17 @@ class App:
         self.p_console = tk.Frame(self.nb)
         self.p_dash = tk.Frame(self.nb)
         self.p_plots = tk.Frame(self.nb)
-        self.frames_ += [self.p_console, self.p_dash, self.p_plots]
+        self.p_cal = tk.Frame(self.nb)
+        self.frames_ += [self.p_console, self.p_dash, self.p_plots, self.p_cal]
         self.nb.add(self.p_console, text="  Console  (Ctrl+1)  ")
         self.nb.add(self.p_dash, text="  Dashboard  (Ctrl+2)  ")
         self.nb.add(self.p_plots, text="  Plots  (Ctrl+3)  ")
+        self.nb.add(self.p_cal, text="  Canards  (Ctrl+4)  ")
         self._console(self.p_console)
         self._dashboard(self.p_dash)
         self._plots(self.p_plots)
-        self.nb.select(min(int(self.cfg.get("tab", 0)), 2))
+        self._canards(self.p_cal)
+        self.nb.select(min(int(self.cfg.get("tab", 0)), 3))
         self.nb.bind("<<NotebookTabChanged>>", lambda _e: self._tab_changed())
 
         foot = tk.Frame(r)
@@ -419,7 +426,7 @@ class App:
         self.foot_r.pack(side="right")
         self.labels_ += [self.foot_l, self.foot_r]
 
-        for i in (1, 2, 3):
+        for i in (1, 2, 3, 4):
             r.bind_all(f"<Control-Key-{i}>", lambda _e, k=i - 1: self.nb.select(k))
         r.bind_all("<F1>", lambda _e: self.show_keys())
         r.bind_all("<F2>", lambda _e: self.toggle_stream())
@@ -684,6 +691,155 @@ class App:
         self.dash_note.pack(fill="x", pady=(0, 6))
         self.dim_labels.append(self.dash_note)
 
+    # ------------------------------------------------------- canard alignment
+    CAL_STEPS = (-1.0, -0.1, -0.02, +0.02, +0.1, +1.0)
+    CAL_PAD = ("BOOT", "CAL", "SETTLE")
+
+    def _canards(self, p) -> None:
+        """CAL-01: jog each canard onto its jig or laser line, then save the zeros."""
+        sc = VScroll(p)
+        sc.pack(fill="both", expand=True)
+        self.themed.append(sc)
+        body = tk.Frame(sc.body)
+        body.pack(fill="both", expand=True, padx=10, pady=10)
+        self.frames_.append(body)
+        intro = tk.Label(body, anchor="w", justify="left", font=self.f_ui, wraplength=940, text=(
+            "On the pad before READY (phase SETTLE): Begin, nudge each canard until it sits on its jig or laser "
+            "line, then Save. While a session runs the canards hold the trial zero and READY is held. Cancel, a "
+            "phase change, a HARD fault, losing USB or 60 s without a command restores the stored zero."))
+        intro.pack(fill="x")
+        self.dim_labels.append(intro)
+
+        tiles = tk.Frame(body)
+        tiles.pack(fill="x", pady=(10, 6))
+        self.frames_.append(tiles)
+        self.t_cal_sess = Tile(self, tiles, "Session", 8)
+        self.t_cal_store = Tile(self, tiles, "Stored calibration", 12)
+        self.t_cal_journal = Tile(self, tiles, "Journal (saves)", 8)
+        self.t_cal_idle = Tile(self, tiles, "Auto-revert in", 6)
+        self.t_cal_ready = Tile(self, tiles, "READY gate", 8)
+        for i, t in enumerate((self.t_cal_sess, self.t_cal_store, self.t_cal_journal, self.t_cal_idle,
+                               self.t_cal_ready)):
+            t.grid(row=0, column=i, sticky="nsew", padx=(0, 6))
+            tiles.columnconfigure(i, weight=1, uniform="cal")
+
+        bar = tk.Frame(body)
+        bar.pack(fill="x", pady=(4, 8))
+        self.frames_.append(bar)
+        self.b_cal_begin = self._button(bar, "Begin session", lambda: self.send("cal begin"), primary=True)
+        self.b_cal_save = self._button(bar, "Save...", self.on_cal_save, primary=True)
+        self.b_cal_cancel = self._button(bar, "Cancel, restore stored", lambda: self.send("cal cancel"), danger=True)
+        self.b_cal_refresh = self._button(bar, "Refresh", lambda: self.send("cal"))
+        for b in (self.b_cal_begin, self.b_cal_save, self.b_cal_cancel, self.b_cal_refresh):
+            b.pack(side="left", padx=(0, 6))
+
+        grid = tk.Frame(body, highlightthickness=1, padx=10, pady=8)
+        grid.pack(fill="x")
+        self.panels_.append(grid)
+        for col, h in enumerate(("Canard", "Stored (deg)", "Trial (deg)", "Change", "Jog (deg)", "Set (deg)")):
+            lab = tk.Label(grid, text=h.upper(), font=self.f_head, anchor="w")
+            lab.grid(row=0, column=col, sticky="w", padx=(0, 14), pady=(0, 4))
+            self.panel_labels.append((lab, "dim"))
+        self.cal_rows, self.cal_jog_btns, self.cal_entries = [], [], []
+        for i, name in enumerate(link.FIN_NAMES):
+            r = i + 1
+            row = {}
+            for col, (key, font, role) in enumerate((("name", self.f_ui, "text"), ("stored", self.f_mid, "dim"),
+                                                     ("trial", self.f_mid, "text"), ("delta", self.f_mono, "dim"))):
+                lab = tk.Label(grid, text=name if key == "name" else "--", font=font, anchor="w" if col == 0 else "e",
+                               width=None if col == 0 else 8)
+                lab.grid(row=r, column=col, sticky="w" if col == 0 else "e", padx=(0, 14), pady=3)
+                self.panel_labels.append((lab, role))
+                row[key] = lab
+            jf = tk.Frame(grid, highlightthickness=0)
+            jf.grid(row=r, column=4, sticky="w", padx=(0, 14))
+            self.panels_.append(jf)
+            for st in self.CAL_STEPS:
+                b = self._button(jf, f"{st:+g}", lambda i=i, st=st: self.send(f"cal jog {i} {st:+.2f}"))
+                b.configure(anchor="center", width=5, padx=2)
+                b.pack(side="left", padx=(0, 3))
+                self.cal_jog_btns.append(b)
+            sf = tk.Frame(grid, highlightthickness=0)
+            sf.grid(row=r, column=5, sticky="w")
+            self.panels_.append(sf)
+            e = tk.Entry(sf, font=self.f_mono, width=8, relief="flat", highlightthickness=1)
+            e.pack(side="left", ipady=4)
+            e.bind("<Return>", lambda _e, i=i, e=e: self.cal_set(i, e))
+            b = self._button(sf, "Set", lambda i=i, e=e: self.cal_set(i, e))
+            b.pack(side="left", padx=(4, 0))
+            self.cal_entries.append(e)
+            self.cal_jog_btns.append(b)
+            self.cal_rows.append(row)
+        note = tk.Label(body, anchor="w", justify="left", font=self.f_ui, wraplength=940, text=(
+            "Angles are at the servo. 0.02 deg is about one PWM tick (0.019 deg). Limits: 2 deg per jog, "
+            "10 deg in total (more than that means the linkage or horn is wrong, not the zero). Every save is "
+            "appended to a flash journal, recorded in the next flight log and kept through firmware updates."))
+        note.pack(fill="x", pady=(8, 0))
+        self.dim_labels.append(note)
+
+    def cal_set(self, i: int, e: tk.Entry) -> None:
+        txt = e.get().strip()
+        if not re.fullmatch(r"[+-]?(\d{1,2}(\.\d{0,3})?|\.\d{1,3})", txt):
+            self.note(f"canard {i}: '{txt}' is not an angle in degrees (up to 3 decimals, e.g. -0.125)", "err")
+            return
+        if self.send(f"cal set {i} {txt}"):
+            e.delete(0, "end")
+
+    def on_cal_save(self) -> None:
+        c = self.cal
+        if not c or c["state"] != "ALIGN":
+            return
+        rows = "\n".join(f"  {n:<9} {z:+.3f}  ->  {t:+.3f} deg" for n, z, t in zip(link.FIN_NAMES, c["zero"], c["trial"]))
+        if messagebox.askokcancel(APP, "Save these canard zeros to the flight computer?\n\n" + rows +
+                                  "\n\nThey apply to every flight until the next save.", icon="warning",
+                                  default="cancel"):
+            self.send("cal save")
+
+    def _cal_session_live(self) -> bool:
+        st = self.status
+        if st and self._age() < STALE_S and st.get("cal"):
+            return st["cal"] == "ALIGN"
+        return bool(self.cal and self.cal["state"] == "ALIGN")
+
+    def refresh_cal(self) -> None:
+        if not hasattr(self, "b_cal_begin"):
+            return
+        conn = self.board.connected.is_set() if hasattr(self, "board") else False
+        ok = conn and self.busy is None
+        c = self.cal if conn else None
+        live = conn and self._cal_session_live()
+        # The status line reports the session ending (idle, phase, fault): ask for the details once.
+        if c and (c["state"] == "ALIGN") != live and ok and time.monotonic() - self.cal_query_t > 1.0:
+            self.cal_query_t = time.monotonic()
+            self.tx("cal")
+        pad = self.phase() in self.CAL_PAD
+        self.b_cal_begin.configure(state="normal" if ok and pad and not live else "disabled")
+        for b in [self.b_cal_save, self.b_cal_cancel] + self.cal_jog_btns:
+            b.configure(state="normal" if ok and live else "disabled")
+        for e in self.cal_entries:
+            e.configure(state="normal" if ok and live else "disabled")
+        self.b_cal_refresh.configure(state="normal" if ok else "disabled")
+        if not c:
+            for t in (self.t_cal_sess, self.t_cal_store, self.t_cal_journal, self.t_cal_idle, self.t_cal_ready):
+                t.set("--", "idle")
+            for row in self.cal_rows:
+                for k in ("stored", "trial", "delta"):
+                    row[k].configure(text="--")
+            return
+        self.t_cal_sess.set("ALIGNING" if live else "idle", "warn" if live else "idle")
+        self.t_cal_store.set(f"OK, seq {c['seq']}" if c["stored"] == "OK" else "NONE",
+                             "ok" if c["stored"] == "OK" else "bad")
+        full = c["used"] >= c["slots"]
+        self.t_cal_journal.set(f"{c['used']}/{c['slots']}" + (" FULL" if full else ""), "bad" if full else "idle")
+        left = max(0, round(c["idle_s"] - (time.monotonic() - self.cal_t))) if live else None
+        self.t_cal_idle.set(f"{left} s" if left is not None else "--", "warn" if left is not None and left < 15 else "idle")
+        held = live or c["stored"] != "OK"
+        self.t_cal_ready.set("HELD" if held else "allowed", "warn" if held else "ok")
+        for row, z, t in zip(self.cal_rows, c["zero"], c["trial"] if live else c["zero"]):
+            row["stored"].configure(text=f"{z:+.3f}")
+            row["trial"].configure(text=f"{t:+.3f}" if live else "--")
+            row["delta"].configure(text=f"{t - z:+.3f}" if live else "")
+
     def _events(self, p) -> None:
         cols = ("pc", "board", "phase", "text")
         wrap = tk.Frame(p)
@@ -794,7 +950,7 @@ class App:
         self.pin.configure(bg=c["panel"], fg=c["text"])
         self.term.configure(bg=c["term"], fg=c["text"], insertbackground=c["text"], selectbackground=c["sel"],
                             selectforeground=c["text"], highlightbackground=c["edge"], highlightcolor=c["info"])
-        for e in (self.entry, self.find_e):
+        for e in [self.entry, self.find_e] + getattr(self, "cal_entries", []):
             e.configure(bg=c["term"], fg=c["text"], insertbackground=c["text"], highlightbackground=c["edge"],
                         highlightcolor=c["info"], selectbackground=c["sel"], selectforeground=c["text"])
         for tag, role in (("sent", "sent"), ("evt", "info"), ("err", "bad"), ("ok", "ok"), ("boot", "dim"),
@@ -878,6 +1034,9 @@ class App:
             self.stream_on = True
             self.root.after(600, lambda: self.busy is None and self.board.connected.is_set()
                             and self.tx("ver"))
+            self.root.after(900, lambda: self.busy is None and self.board.connected.is_set()
+                            and self.tx("cal"))
+            self.cal, self.cal_warned = None, False
         elif state == "waiting" and detail == "board disconnected":
             self.note("board disconnected (reset, reflash or cable) - reconnecting automatically", "note")
             self.status = None
@@ -902,6 +1061,15 @@ class App:
                 if self.v_show_status.get():
                     out.append((s, "status"))
                 continue
+            cal = link.parse_cal(s)
+            if cal:
+                self.cal, self.cal_t = cal, time.monotonic()
+                if cal["stored"] != "OK" and not self.cal_warned:
+                    self.cal_warned = True
+                    self.root.after(0, lambda: self.note(
+                        "No canard zero calibration stored: READY is held. Align the canards in the "
+                        "Canards tab (Ctrl+4).", "err"))
+                self.refresh_cal()
             ev = link.parse_event(s)
             if ev:
                 self._event(ev)
@@ -968,6 +1136,9 @@ class App:
 
     def _tab_changed(self) -> None:
         self.draw_plots()
+        if (self.nb.index("current") == 3 and hasattr(self, "board") and self.busy is None
+                and self.board.connected.is_set()):
+            self.tx("cal")
 
     # ---------------------------------------------------------------- terminal
     def _write(self, items: list[tuple[str, str]]) -> None:
@@ -1271,6 +1442,7 @@ class App:
         self.b_open.configure(state="normal" if self.last_pull_dir else "disabled")
         self.b_elf.configure(state="normal" if idle else "disabled")
         self.b_build.configure(state="normal" if idle else "disabled")
+        self.refresh_cal()
         if self.busy:
             why = f"Busy: {self.busy}"
         elif not conn:

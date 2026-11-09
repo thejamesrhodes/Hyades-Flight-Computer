@@ -23,7 +23,11 @@ from fc_link import MONITORS, PHASES, STATE, SYNC0, SYNC1, MSG_STATE, MSG_IMU
 import random
 
 BUILD = "sim0000"
-LOG_CAP = 384 * 1024
+LOG_CAP = 384 * 1024 - 4096            # CAL-01: 4 KB calibration journal ahead of the log
+CAL_SLOTS = 128
+CAL_IDLE_S = 60.0
+CAL_LIMIT = 10.0                       # deg
+CAL_STEP = 2.0                         # deg, largest single jog
 REC = 48
 
 
@@ -34,7 +38,7 @@ def _fx(v: float, dp: int) -> str:
 class SimDevice:
     """Board state; outlives a simulated USB detach (reboot, reflash)."""
 
-    def __init__(self, binary: bool = False, boot_s: float = 2.5) -> None:
+    def __init__(self, binary: bool = False, boot_s: float = 2.5, cal: list | None = None) -> None:
         self.binary = binary
         self.boot_s = boot_s
         self.lock = threading.Lock()
@@ -47,6 +51,10 @@ class SimDevice:
         self.reset_cause = "POR"
         self.builds = BUILD
         self.fw_writes = 0
+        # CAL-01 canard zero journal (flash: survives reboot and reflash)
+        self.cal_zero = list(cal) if cal else [0.0] * 4
+        self.cal_seq = 1 if cal else 0
+        self.cal_used = 1 if cal else 0
         self._boot()
         threading.Thread(target=self._tick, name="fc-sim", daemon=True).start()
 
@@ -68,6 +76,9 @@ class SimDevice:
         self.banner_sent = False
         self.settle_t = 0.0
         self.capture = False
+        self.align = False
+        self.trial = list(self.cal_zero)
+        self.align_t = 0.0
 
     def _emit(self, s: str | bytes) -> None:
         """Caller holds the lock."""
@@ -131,6 +142,11 @@ class SimDevice:
                     self.banner_sent = True
                     self._say(f"\r\n=== Hyades FC-V4 (F411 96 MHz) build {self.builds}, reset: {self.reset_cause} ===")
                     self._say(f"[BOOT] log {len(self.log)}/{LOG_CAP} B used. Type 'help' for commands.")
+                    if self.cal_seq:
+                        self._say(f"[BOOT] fin zero cal seq {self.cal_seq}: " + " ".join(_fx3(v) for v in self.cal_zero)
+                                  + f" deg (journal {self.cal_used}/{CAL_SLOTS})")
+                    else:
+                        self._say("[BOOT] fin zero cal: NONE, READY is held - align the canards ('cal begin')")
                     self._say("[BOOT] GPS probe: PA10 rx1 float 0e | PA15 tx1 float 0e | PA3 rx2 high 1843e ~9600 | PA2 tx2 float 0e")
                     self._say("[BOOT] GPS port1 9600 Bd 0 B, port2 9600 Bd 0 B, 0 NMEA -> module transmitting")
                     self._event("boot")
@@ -140,7 +156,20 @@ class SimDevice:
                 if self.phase == "CAL" and t > self.boot_s * 0.4:
                     self._say("[BOOT] gyro bias dps +0.120 -0.034 +0.051 | seed RPY deg +0.4 -1.1 +0.0")
                     self._go("SETTLE")
-                if self.phase == "SETTLE" and t > self.boot_s and time.monotonic() - self.settle_t > 1.0:
+                if self.align:
+                    why = None
+                    if self.phase not in ("BOOT", "CAL", "SETTLE"):
+                        why = "phase change"
+                    elif self.active:
+                        why = "HARD fault"
+                    elif time.monotonic() - self.align_t >= CAL_IDLE_S:
+                        why = "idle timeout"
+                    if why:
+                        self.align = False
+                        self.trial = list(self.cal_zero)
+                        self._event(f"fin align ended: {why} (reverted)")
+                if (self.phase == "SETTLE" and t > self.boot_s and time.monotonic() - self.settle_t > 1.0
+                        and self.cal_seq and not self.align):
                     self._go("READY")
                     self.mode = "FULL"
                 if self.imu_fail and self.phase not in ("LOCKOUT", "CATO"):
@@ -183,7 +212,8 @@ class SimDevice:
                         f"RPY {_fx(roll, 1)} {_fx(pitch, 1)} {_fx(yaw, 1)} w {_fx(0.5, 1)} {_fx(-0.2, 1)} {_fx(5.0, 1)} "
                         f"|a|={_fx(1.0, 2)} fin {' '.join(_fx(f, 2) for f in fins)} "
                         f"imu={'FAIL' if self.imu_fail else 'OK'}({int(self.imu_fail)}) loop=910 ovr={self.ovr} "
-                        f"gps={gps} s0 alt=+0.0 rx=0 nmea=0 log={len(self.log) * 100 // LOG_CAP}%")
+                        f"gps={gps} s0 alt=+0.0 rx=0 nmea=0 log={len(self.log) * 100 // LOG_CAP}% "
+                        f"h=+0.0 vz=+0.0 q=+0 cal={'ALIGN' if self.align else ('OK' if self.cal_seq else 'NONE')}")
 
     # -- 'imu capture': synthetic white + random-walk gyro, white accel, 16-bit counts
     SIM_ODR = 224.2
@@ -253,6 +283,70 @@ class SimDevice:
         self.fw_writes += 1
         threading.Timer(0.3, lambda: self.detach(2.0, "SOFT")).start()
 
+    def _cal_line(self) -> None:
+        t = self.trial if self.align else self.cal_zero
+        idle = max(0, int(CAL_IDLE_S - (time.monotonic() - self.align_t))) if self.align else 0
+        held = self.align or not self.cal_seq
+        self._say(f"CAL state={'ALIGN' if self.align else 'IDLE'} stored={'OK' if self.cal_seq else 'NONE'} "
+                  f"seq={self.cal_seq} zero={','.join(_fx3(v) for v in self.cal_zero)} "
+                  f"trial={','.join(_fx3(v) for v in t)} journal={self.cal_used}/{CAL_SLOTS} "
+                  f"idle_s={idle} ready={'held' if held else 'ok'}")
+
+    def _cal(self, a: list[str]) -> None:
+        """CAL-01 alignment session, same rules and replies as cmd_cal in app.c."""
+        sub = a[1] if len(a) > 1 else "show"
+        err = None
+        if sub == "begin":
+            if self.align:
+                err = "session already active"
+            elif self.phase not in ("BOOT", "CAL", "SETTLE"):
+                err = "only on the pad before READY (SETTLING)"
+            elif self.active:
+                err = "a HARD fault is active"
+            else:
+                self.align, self.trial, self.align_t = True, list(self.cal_zero), time.monotonic()
+                self._event("fin align session started")
+        elif sub in ("jog", "set"):
+            v = _parse_deg(a[3]) if len(a) > 3 else None
+            if len(a) < 4 or a[2] not in ("0", "1", "2", "3") or v is None:
+                self._say(f"usage: cal {sub} <fin 0-3> <deg, e.g. -0.10>")
+                return
+            i = int(a[2])
+            if not self.align:
+                err = "no session ('cal begin' first)"
+            elif sub == "jog" and abs(v) > CAL_STEP:
+                err = "jog larger than 2 deg"
+            else:
+                new = round(self.trial[i] + v if sub == "jog" else v, 3)
+                if abs(new) > CAL_LIMIT:
+                    err = "zero outside +/-10 deg (check the linkage)"
+                else:
+                    self.trial[i], self.align_t = new, time.monotonic()
+        elif sub == "save":
+            if not self.align:
+                err = "no session ('cal begin' first)"
+            elif self.cal_used >= CAL_SLOTS:
+                self._say(f"ERR cal: journal full ({CAL_SLOTS} saves): pull the log, then 'log erase' (keeps the calibration)")
+                self._cal_line()
+                return
+            else:
+                self.cal_zero, self.align = list(self.trial), False
+                self.cal_seq += 1
+                self.cal_used += 1
+                self._event(f"fin zero cal saved seq {self.cal_seq}")
+        elif sub == "cancel":
+            if not self.align:
+                err = "no session ('cal begin' first)"
+            else:
+                self.align, self.trial = False, list(self.cal_zero)
+                self._event("fin align cancelled (reverted)")
+        elif sub != "show":
+            self._say("usage: cal [show|begin|jog <fin> <deg>|set <fin> <deg>|save|cancel]")
+            return
+        if err:
+            self._say(f"ERR cal: {err}")
+        self._cal_line()
+
     def _dispatch(self, a: list[str]) -> None:
         cmd = a[0]
         arg = a[1] if len(a) > 1 else ""
@@ -261,6 +355,7 @@ class SimDevice:
             for n, h in (("help", "this list"), ("ver", "build id"), ("stream", "[on|off] periodic status"),
                          ("faults", "FDIR monitors"), ("tasks", "per-task timing"), ("gps", "GNSS detail"),
                          ("imu", "IMU diagnostics"), ("log", "[info|start|stop|erase|pull] flight log"),
+                         ("cal", "[begin|jog f d|set f d|save|cancel] canard zero alignment (pad)"),
                          ("fw", "<size> <crc32hex> USB firmware update"), ("reboot", "reset"),
                          ("inject", "wdg|phase|imu bench fault injection")):
                 self._say(f"  {n:<7} {h}")
@@ -339,6 +434,9 @@ class SimDevice:
                         self.log = bytearray()
                         self._say("log erase: OK")
                         self._event("log erased")
+                        if self.cal_seq:
+                            self.cal_used = 1
+                            self._say("fin zero calibration rewritten: OK")
                 threading.Thread(target=done, daemon=True).start()
             elif arg == "pull":
                 data = bytes(self.log)
@@ -348,6 +446,8 @@ class SimDevice:
             else:
                 self._say(f"log {'active' if self.logging else 'idle'}, {len(self.log)}/{LOG_CAP} B used "
                           f"({len(self.log) // REC} records), 0 write errors")
+        elif cmd == "cal":
+            self._cal(a)
         elif cmd == "fw":
             if flying:
                 self._say("FWABORT in-flight")
@@ -388,6 +488,20 @@ class SimDevice:
             self._say(f"ERR unknown command '{cmd}' (help)")
 
 
+def _fx3(v: float) -> str:
+    return f"{v:+.3f}"
+
+
+def _parse_deg(s: str) -> float | None:
+    """Same rules as Align_ParseMdeg: [+-]digits[.ddd], |v| < 100, <= 3 decimals."""
+    import re
+    m = re.fullmatch(r"([+-]?)(\d{0,2})(?:\.(\d{0,3}))?", s)
+    if not m or not (m.group(2) or m.group(3)):
+        return None
+    v = int(m.group(2) or 0) + int((m.group(3) or "").ljust(3, "0") or 0) / 1000
+    return -v if m.group(1) == "-" else v
+
+
 class SimPort:
     """Just enough of serial.Serial for fc_link.Board."""
 
@@ -425,9 +539,9 @@ class SimPort:
                 self.dev.port = None
 
 
-def make(binary: bool = False, boot_s: float = 2.5):
+def make(binary: bool = False, boot_s: float = 2.5, cal: list | None = None):
     """(finder, opener, device) for fc_link.Board."""
-    dev = SimDevice(binary=binary, boot_s=boot_s)
+    dev = SimDevice(binary=binary, boot_s=boot_s, cal=cal)
 
     def finder():
         return "SIM" if dev.present else None

@@ -246,5 +246,75 @@ class Hitl(unittest.TestCase):
         self.assertLess(abs(v.apogee - m.ref["apogee"]) / m.ref["apogee"], 0.02)
         self.assertLess(abs(v.t_apogee - m.ref["t_apogee"]), 0.3)
 
+
+class CanardAlignment(unittest.TestCase):
+    """CAL-01: 'cal' replies, status token and the simulator's session rules (mirror of app.c)."""
+
+    LINE = ("CAL state=ALIGN stored=OK seq=3 zero=+0.120,-0.040,+0.000,+0.310 "
+            "trial=+0.140,-0.040,+0.000,+0.310 journal=3/128 idle_s=55 ready=held")
+
+    def test_parse_cal(self):
+        c = link.parse_cal(self.LINE)
+        self.assertEqual((c["state"], c["stored"], c["seq"], c["used"], c["slots"], c["ready"]),
+                         ("ALIGN", "OK", 3, 3, 128, "held"))
+        self.assertEqual(c["trial"], [0.14, -0.04, 0.0, 0.31])
+        self.assertIsNone(link.parse_cal("CAL state=ALIGN stored=OK seq=3 zero=+0.1,+0.2 trial=x"))
+        self.assertIsNone(link.parse_cal("ERR cal: no session ('cal begin' first)"))
+
+    def test_status_cal_token_optional(self):
+        self.assertIsNone(link.parse_status(STATUS)["cal"])                 # older firmware
+        st = link.parse_status(STATUS + " h=+1.0 vz=+0.0 q=+0 cal=NONE")
+        self.assertEqual(st["cal"], "NONE")
+
+    def setUp(self):
+        self.b = None
+
+    def tearDown(self):
+        if self.b:
+            self.b.stop()
+
+    def board(self, cal=None):
+        finder, opener, self.dev = fc_sim.make(boot_s=0.3, cal=cal)
+        self.b = link.Board(lambda *_a: None, finder=finder, opener=opener)
+        self.assertTrue(self.b.wait_connect(3))
+        time.sleep(1.0)
+
+    def ask(self, cmd):
+        self.b.proto_begin()
+        self.b.send_line(cmd)
+        r = self.b.expect(("CAL ", "usage"), 3.0)
+        self.b.proto_end()
+        return link.parse_cal(r) or r
+
+    def test_no_cal_holds_ready_until_saved(self):
+        self.board()
+        self.assertEqual(self.dev.phase, "SETTLE")
+        self.assertEqual(self.ask("cal")["stored"], "NONE")
+        self.assertEqual(self.ask("cal save")["state"], "IDLE")             # refused: no session
+        self.assertEqual(self.ask("cal begin")["state"], "ALIGN")
+        c = self.ask("cal jog 0 +0.10")
+        self.assertEqual(c["trial"][0], 0.1)
+        self.assertEqual(self.ask("cal jog 0 +2.5")["trial"][0], 0.1)       # over the 2 deg step: refused
+        self.assertEqual(self.ask("cal set 3 -10.5")["trial"][3], 0.0)      # over the 10 deg limit: refused
+        self.assertTrue(str(self.ask("cal jog 4 0.1")).startswith("usage"))
+        time.sleep(1.2)
+        self.assertEqual(self.dev.phase, "SETTLE")                          # held while aligning
+        c = self.ask("cal save")
+        self.assertEqual((c["state"], c["stored"], c["seq"], c["zero"][0]), ("IDLE", "OK", 1, 0.1))
+        time.sleep(1.5)
+        self.assertEqual(self.dev.phase, "READY")
+
+    def test_cancel_reverts_and_ready_refuses_begin(self):
+        self.board(cal=[0.2, 0.0, 0.0, 0.0])
+        time.sleep(1.0)
+        self.assertEqual(self.dev.phase, "READY")
+        self.assertEqual(self.ask("cal begin")["state"], "IDLE")            # not on the pad: refused
+        with self.dev.lock:
+            self.dev.phase = "SETTLE"
+        self.ask("cal begin")
+        self.ask("cal jog 0 -0.5")
+        c = self.ask("cal cancel")
+        self.assertEqual((c["state"], c["zero"][0]), ("IDLE", 0.2))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

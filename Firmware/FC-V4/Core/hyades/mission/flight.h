@@ -31,7 +31,7 @@
 #include "detect.h"
 
 /* Event codes (also the EVENT log record code). */
-typedef enum { EV_BOOT = 1, EV_PHASE, EV_TRIP, EV_CLEAR, EV_MODE, EV_LOG, EV_CORRUPT, EV_MAINT } EventCode;
+typedef enum { EV_BOOT = 1, EV_PHASE, EV_TRIP, EV_CLEAR, EV_MODE, EV_LOG, EV_CORRUPT, EV_MAINT, EV_CAL } EventCode;
 
 typedef void (*FlightEventFn)(void *ctx, EventCode code, uint32_t arg, const char *text);
 

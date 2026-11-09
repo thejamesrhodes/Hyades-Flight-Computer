@@ -16,7 +16,7 @@
 #define BSY_SPIN_PROGRAM 20000u        /* >> 16 us word program at 96 MHz        */
 #define BSY_SPIN_ERASE   400000000u    /* >> 2 s sector erase (bound, not timing) */
 
-typedef char logsize_check[((LOG_FLASH_SIZE % LOGREC_SIZE) == 0u) ? 1 : -1];
+typedef char logsize_check[((LOG_FLASH_SIZE % LOGREC_SIZE) == 0u) && (LOGREC_SIZE == 48u) ? 1 : -1];   /* board.h sizes in 48 B records */
 
 static uint32_t s_next;           /* next free slot index */
 static bool     s_active;

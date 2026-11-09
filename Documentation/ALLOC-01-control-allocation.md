@@ -52,9 +52,9 @@ The allocator runs in `Flight_Step` after `Ctrl_Update` and before the shadow an
    - Extra ticks go to an opposite pair first (pure roll). The odd tick alternates between the fins of a pair frame by frame, so its pitch moment averages to zero (figure panel b).
    - This gives 4× finer roll resolution at a cost of at most one tick (0.005° RMS in SITL) of pitch or yaw difference.
    - At 8 MHz it is redundant, because the tick (0.019°) is already finer than the servo's own resolution (0.029°).
-5. **Per-fin zero offsets** (`FIN_ZERO_OFFSET_DEG` in `board.h`). These are applied in `PWM_SetFin` and `PWM_CentreFins` in whole ticks, so they never disturb the quantisation.
+5. **Per-fin zero offsets.** These are applied in `PWM_SetFin` and `PWM_CentreFins` in whole ticks, so they never disturb the quantisation. Since CAL-01 they are measured with the `cal` alignment commands and stored in a flash journal, not set in `board.h`.
    - They correct servo spline indexing and linkage error.
-   - The table currently holds zeros, and PLAN-01 G4 fills it.
+   - PLAN-01 G4 measures them with the CAL-01 procedure.
 
 `PWM_SetFin`, the allocator and the SITL all quantise through the same `Alloc_NormToTicks`.
 
@@ -118,7 +118,7 @@ At 5–9 kPa the residual roll is set by bearing friction and gusts, not by a to
 
 | Benefit | Status | Evidence |
 |---|---|---|
-| Per-fin zero calibration | Implemented (table of zeros until measured) | Largest effect found: coast RMS p95 +27 %, peak p95 +24 deg/s uncalibrated |
+| Per-fin zero calibration | Implemented: CAL-01 alignment commands and flash journal, READY held until stored | Largest effect found: coast RMS p95 +27 %, peak p95 +24 deg/s uncalibrated |
 | Dither with no net canard moment | Implemented, default | No penalty, removes the only moment the dither created |
 | Roll-priority saturation for pitch and yaw control (Flight 2) | Implemented | Unit test. Not exercised in Flight 1. |
 | One quantiser shared by the firmware, the PWM driver and the SITL | Implemented | SITL now reproduces the PWM tick exactly |
@@ -134,7 +134,7 @@ At 5–9 kPa the residual roll is set by bearing friction and gusts, not by a to
   - PSC and ARR come from `PWM_TICK_HZ`, giving PSC 11 and ARR 47 999 at 8 MHz;
   - compile-time checks that the tick divides 96 MHz and that ARR fits TIM3's 16 bits;
   - per-fin zero offsets, applied in whole ticks.
-- **`board.h`:** `PWM_TICK_HZ 8000000u`, `CTRL_DITHER_NULL 1`, `CTRL_ALLOC_STAGGER 0`, `FIN_ZERO_OFFSET_DEG`.
+- **`board.h`:** `PWM_TICK_HZ 8000000u`, `CTRL_DITHER_NULL 1`, `CTRL_ALLOC_STAGGER 0`. The zero table moved to the CAL-01 flash journal.
 - **Host tests:** all suites pass, including the new `test_alloc`:
   - the sum is kept within one tick over a ramp;
   - pair first, odd tick alternating;
@@ -158,5 +158,5 @@ At 5–9 kPa the residual roll is set by bearing friction and gusts, not by a to
    - steps of 0.125 µs;
    - the 6 ms fallback period;
    - all four pulses starting together.
-2. Measure each canard's zero against a jig, then fill `FIN_ZERO_OFFSET_DEG`.
+2. Align each canard against a jig with the CAL-01 procedure and save.
 3. Measure the servo dead band and resolution with a slow ramp, as in BP-01. If the dead band is below 0.15°, re-run variant E1.

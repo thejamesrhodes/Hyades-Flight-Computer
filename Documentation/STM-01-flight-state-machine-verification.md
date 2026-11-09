@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | T1 | BOOT → CALIBRATE | IMU init and self-test pass | `app.c` boot | |
 | T2 | CALIBRATE → SETTLING | 1 s gyro-bias average, IEKF seeded, previous reset not by IWDG | `app.c` boot | |
-| T3 | SETTLING → READY | worst severity = INFO for `READY_HOLD_MS`, and `ready_inhibit` false (flight build: ≥ 200 KB of erased log) | arbiter | Log ring arms (if `LOG_AUTOSTART`, log space OK, no firmware update) |
+| T3 | SETTLING → READY | worst severity = INFO for `READY_HOLD_MS`, and `ready_inhibit` false: no canard alignment session running, a valid canard-zero calibration stored (CAL-01), and in the flight build ≥ 200 KB of erased log | arbiter | Log ring arms (if `LOG_AUTOSTART`, log space OK, no firmware update) |
 | T4 | READY → BOOST | f_ax > 3 g for 100 ms and nav v_up > 8 m/s, **or** f_ax > 3 g for 300 ms | `Detect_Step` | Log commits; drain starts |
 | T5 | BOOST → COAST | t_boost ≥ 0.1 s and f_ax < 0 for 50 ms | `Detect_Step` | |
 | T6 | COAST → DESCENT | nav valid and v_up < 0 for 50 ms, **or** t_coast ≥ `DET_T_APOGEE_MAX_S` (11.5 s; set per motor, MC-01 §4) | `Detect_Step` | Log drops to 20 Hz; fins OFF |
