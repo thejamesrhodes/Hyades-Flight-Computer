@@ -2,12 +2,15 @@
  * pwm.c  —  Servo PWM driver
  *
  * TIM2/TIM3 are configured by CubeMX as 32-bit/16-bit up-counters; this driver
- * sets PSC for a 1 MHz tick and ARR for the servo frame, then drives compare
- * registers directly. APB1 timer clock on this board is 96 MHz -> PSC=95.
+ * sets PSC for a PWM_TICK_HZ tick (board.h, ALLOC-01) and ARR for the servo
+ * frame, then drives compare registers directly. APB1 timer clock 96 MHz.
+ * Fin commands are quantised by Alloc_NormToTicks, the same function the
+ * allocator and the SITL use, and offset by the per-fin mechanical zero.
  * No logging here (keeps the actuator path I/O-free aside from the timer regs).
  * ============================================================================ */
 #include "pwm.h"
 #include "board.h"
+#include "alloc.h"
 #include <math.h>
 
 extern TIM_HandleTypeDef htim2, htim3;
@@ -26,6 +29,19 @@ static const PwmChan pwm_map[PWM_CH_COUNT] = {
 /* Fin index 0..3 -> PWM_CH3..PWM_CH6. */
 static const PWM_Channel fin_chan[FIN_COUNT] = { PWM_CH3, PWM_CH4, PWM_CH5, PWM_CH6 };
 
+#define PWM_PSC           ((PWM_TIM_CLK_HZ / PWM_TICK_HZ) - 1u)
+#define PWM_ARR           ((SERVO_PERIOD_US * PWM_TICKS_PER_US) - 1u)
+#define PWM_CENTRE_TICKS  ((int32_t)(SERVO_CENTRE_US * PWM_TICKS_PER_US))
+#define PWM_MIN_TICKS     (SERVO_MIN_US * PWM_TICKS_PER_US)
+#define PWM_MAX_TICKS     (SERVO_MAX_US * PWM_TICKS_PER_US)
+_Static_assert((PWM_TIM_CLK_HZ % PWM_TICK_HZ) == 0u, "PWM tick must divide the timer clock");
+_Static_assert((PWM_TICK_HZ % 1000000u) == 0u, "PWM tick must be a whole number of ticks per us");
+_Static_assert(PWM_ARR <= 65535u, "TIM3 is 16-bit: servo period too long for this tick");
+
+/* Per-fin mechanical zero in ticks, set once in PWM_Init (integer afterwards,
+ * so PWM_CentreFins stays safe to call from fault handlers). */
+static int32_t fin_zero_ticks[FIN_COUNT];
+
 void PWM_Init(void)
 {
     GPIO_InitTypeDef g = {0};
@@ -40,52 +56,62 @@ void PWM_Init(void)
     g.Pin = GPIO_PIN_10;             g.Alternate = GPIO_AF1_TIM2;  HAL_GPIO_Init(GPIOB, &g);
 
     TIM_OC_InitTypeDef oc = {0};
-    oc.OCMode = TIM_OCMODE_PWM1; oc.Pulse = SERVO_CENTRE_US;
+    oc.OCMode = TIM_OCMODE_PWM1; oc.Pulse = (uint32_t)PWM_CENTRE_TICKS;
     oc.OCPolarity = TIM_OCPOLARITY_HIGH; oc.OCFastMode = TIM_OCFAST_DISABLE;
     HAL_TIM_PWM_ConfigChannel(&htim3, &oc, TIM_CHANNEL_3);
     HAL_TIM_PWM_ConfigChannel(&htim3, &oc, TIM_CHANNEL_4);
 
-    __HAL_TIM_SET_PRESCALER(&htim2, 95u);
-    __HAL_TIM_SET_AUTORELOAD(&htim2, SERVO_PERIOD_US - 1u);
+    __HAL_TIM_SET_PRESCALER(&htim2, PWM_PSC);
+    __HAL_TIM_SET_AUTORELOAD(&htim2, PWM_ARR);
     HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
     HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3);
 
-    __HAL_TIM_SET_PRESCALER(&htim3, 95u);
-    __HAL_TIM_SET_AUTORELOAD(&htim3, SERVO_PERIOD_US - 1u);
+    __HAL_TIM_SET_PRESCALER(&htim3, PWM_PSC);
+    __HAL_TIM_SET_AUTORELOAD(&htim3, PWM_ARR);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
     HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
+    static const float zero_deg[FIN_COUNT] = FIN_ZERO_OFFSET_DEG;
+    for (uint32_t i = 0u; i < FIN_COUNT; i++) {
+        /* bench offsets are a few degrees; clamp to +/-10 deg before the cast (std A2) */
+        float z = isfinite(zero_deg[i]) ? zero_deg[i] : 0.0f;
+        if (z > 10.0f) { z = 10.0f; }
+        if (z < -10.0f) { z = -10.0f; }
+        fin_zero_ticks[i] = (int32_t)lroundf(z * ALLOC_US_PER_DEG * (float)PWM_TICKS_PER_US);
+    }
     for (uint32_t i = 0u; i < (uint32_t)PWM_CH_COUNT; i++) { PWM_SetPulse((PWM_Channel)i, SERVO_CENTRE_US); }
+    PWM_CentreFins();
+}
+
+static void set_ticks(PWM_Channel ch, int32_t ticks)
+{
+    uint32_t t = (ticks > 0) ? (uint32_t)ticks : 0u;
+    if (t < PWM_MIN_TICKS) { t = PWM_MIN_TICKS; }
+    if (t > PWM_MAX_TICKS) { t = PWM_MAX_TICKS; }
+    __HAL_TIM_SET_COMPARE(pwm_map[ch].htim, pwm_map[ch].ch, t);
 }
 
 void PWM_SetPulse(PWM_Channel ch, uint32_t pulse_us)
 {
     if (ch >= PWM_CH_COUNT) { return; }
-    if (pulse_us < SERVO_MIN_US) { pulse_us = SERVO_MIN_US; }
-    if (pulse_us > SERVO_MAX_US) { pulse_us = SERVO_MAX_US; }
-    __HAL_TIM_SET_COMPARE(pwm_map[ch].htim, pwm_map[ch].ch, pulse_us);
+    if (pulse_us > SERVO_MAX_US) { pulse_us = SERVO_MAX_US; }   /* before the multiply: no overflow */
+    set_ticks(ch, (int32_t)(pulse_us * PWM_TICKS_PER_US));
 }
 
-/* Fin command: normalised [-1,+1] about SERVO_CENTRE_US, +/-1 = +/-FIN_DEFLECT_DEG. */
+/* Fin command: normalised [-1,+1] about the fin's zero, +/-1 = +/-FIN_DEFLECT_DEG.
+ * Quantised by Alloc_NormToTicks (clamps, rejects NaN, range-checked cast). */
 void PWM_SetFin(uint8_t fin_idx, float norm)
 {
     if (fin_idx >= FIN_COUNT) { return; }
-    if (!isfinite(norm)) { norm = 0.0f; }              /* NaN would bypass the clamps */
-    if (norm < -1.0f) { norm = -1.0f; }
-    if (norm >  1.0f) { norm =  1.0f; }
-    const float us_per_deg = (float)(SERVO_MAX_US - SERVO_MIN_US) / SERVO_RANGE_DEG;
-    /* norm is clamped to [-1,1], so the pulse is within CENTRE +/- 200 us of
-     * a positive value before the float->uint cast (std A2 range check). */
-    const float us = (float)SERVO_CENTRE_US + (norm * FIN_DEFLECT_DEG * us_per_deg);
-    PWM_SetPulse(fin_chan[fin_idx], (us > 0.0f) ? (uint32_t)(us + 0.5f) : 0u);
+    set_ticks(fin_chan[fin_idx], PWM_CENTRE_TICKS + fin_zero_ticks[fin_idx] + Alloc_NormToTicks(norm));
 }
 
 /* Integer-only so it is also safe to call from fault handlers. */
 void PWM_CentreFins(void)
 {
-    for (uint8_t i = 0u; i < FIN_COUNT; i++) { PWM_SetPulse(fin_chan[i], SERVO_CENTRE_US); }
+    for (uint8_t i = 0u; i < FIN_COUNT; i++) { set_ticks(fin_chan[i], PWM_CENTRE_TICKS + fin_zero_ticks[i]); }
 }
 
 /* Start a new servo pulse on every channel NOW with the compare values just

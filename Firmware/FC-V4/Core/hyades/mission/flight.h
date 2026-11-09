@@ -26,6 +26,7 @@
 #include "fdir.h"
 #include "iekf.h"
 #include "control.h"
+#include "alloc.h"
 #include "nav.h"
 #include "detect.h"
 
@@ -61,10 +62,11 @@ typedef struct {
     Fdir       fdir;
     IEKF_State iekf;
     Controller ctrl;
+    Alloc      alloc;          /* control allocation (ALLOC-01)               */
     Nav        nav;
     Detect     det;
     float      fin[4];         /* normalised fin commands APPLIED [-1, 1]      */
-    float      fin_cmd[4];     /* law output (= fin unless shadow mode)        */
+    float      fin_cmd[4];     /* law output, before allocation               */
     bool       shadow;         /* CFG_CTRL_SHADOW: law runs, canards held at 0 */
     float      gyro_rad[3];
     bool       acc_applied;

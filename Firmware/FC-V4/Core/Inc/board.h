@@ -96,6 +96,18 @@
 #define SERVO_CENTRE_US       1520u    /* fin zero; all fin commands are about this */
 #define SERVO_RANGE_DEG       180.0f   /* full mechanical sweep over MIN..MAX   */
 #define FIN_DEFLECT_DEG       30.0f    /* +/- command authority about centre    */
+/* Servo timer tick (ALLOC-01). TIM2/TIM3 run from the 96 MHz APB1 timer clock;
+ * PSC = clock / tick - 1. At 8 MHz one tick is 0.125 us = 0.019 deg at the
+ * servo (6.667 us/deg), against 0.15 deg at the old 1 MHz tick. The fallback
+ * period SERVO_PERIOD_US x ticks/us must fit TIM3's 16-bit ARR (48000). */
+#define PWM_TIM_CLK_HZ        96000000u
+#ifndef PWM_TICK_HZ
+#define PWM_TICK_HZ           8000000u
+#endif
+#define PWM_TICKS_PER_US      (PWM_TICK_HZ / 1000000u)
+/* Per-fin mechanical zero, degrees at the servo, measured on the bench (spline
+ * indexing and linkage). Applied by the PWM driver in whole ticks. */
+#define FIN_ZERO_OFFSET_DEG   { 0.0f, 0.0f, 0.0f, 0.0f }
 
 /* ----------------------------------------------------------------------------
  * 5. CONTROLLER  —  geometric SO(3) outer loop + INDI inner loop
@@ -204,6 +216,19 @@
 #endif
 #ifndef CTRL_DITHER_PERIOD_N
 #define CTRL_DITHER_PERIOD_N   4u       /* 4 frames = 50 Hz at 200 Hz            */
+#endif
+/* Control allocation (alloc.c, ALLOC-01).
+ * CTRL_DITHER_NULL 1: the dither goes on the null axis (top/bottom +a,
+ * left/right -a) in the allocator instead of on the roll command: same dead-band
+ * breaking at each servo, no net canard moment. 0: legacy roll common mode.
+ * CTRL_ALLOC_STAGGER 1: sum-preserving quantisation, roll resolved to 1/4 tick. */
+#ifndef CTRL_DITHER_NULL
+#define CTRL_DITHER_NULL       1        /* ALLOC-01: same roll performance as common
+                                         * mode, no net canard moment from the dither */
+#endif
+#ifndef CTRL_ALLOC_STAGGER
+#define CTRL_ALLOC_STAGGER     0        /* ALLOC-01: no measurable gain at the 8 MHz
+                                         * tick (kept for a coarse-tick build)        */
 #endif
 #ifndef CTRL_TRIM_QSCHED
 #define CTRL_TRIM_QSCHED       1        /* MC-01: coast roll RMS p95 60 -> 41 dps    */

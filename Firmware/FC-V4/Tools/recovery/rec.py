@@ -58,6 +58,9 @@ def sample(rng, n, a, dep):
     s["L_s"] = np.full(n, a.chute_d) * U(0.9, 1.2, n)                   # shroud length ~ 1 D0
     lo, hi = CORDS[a.cord]; s["EA"] = rng.uniform(lo, hi, n) if a.ea is None else np.full(n, a.ea)
     s["EA_s"] = U(2e3, 6e3, n)                                        # nylon shroud bundle
+    s["bk_slack"] = np.full(n, getattr(a, "backup_slack", 0.0) or 0.0)    # Kevlar backup in parallel, slack fraction of L
+    s["bk_EA"] = rng.uniform(6e3, 2.5e4, n)
+    s["el_ok"] = np.full(n, 0.0 if getattr(a, "elastic_fail", False) else 1.0)
     s["zeta"] = U(a.zeta[0], a.zeta[1], n); s["ej_frac"] = U(0.0, 0.5, n)         # pack lag behind F at exit
     return s
 
@@ -106,13 +109,20 @@ def simulate(s, t_end=4.0, dt=2.5e-5, rho=1.2, dt1=1e-6, trace=None, rec=None):
     keys = ("FK", "KA", "KC")
     Tm = {k: np.zeros(n) for k in keys}; Ts = {k: np.zeros(n) for k in keys}      # peak, peak before inflation
     gF = np.zeros(n); gA = np.zeros(n); ang = np.zeros(n); dmin = np.full(n, 9.0); T_tot_max = np.zeros(n)
-    v_hit = np.zeros(n); t_hit = np.full(n, np.nan); GAP0 = 0.40     # attach-point spacing when joined
+    v_hit = np.zeros(n); t_hit = np.full(n, np.nan); GAP0 = 0.40; bk_max = np.zeros(n)     # attach-point spacing when joined
     mu_FK = s["mF"] * s["mK"] / (s["mF"] + s["mK"]); mu_KA = s["mA"] * s["mK"] / (s["mA"] + s["mK"])
     mu_KC = s["mC"] * s["mK"] / (s["mC"] + s["mK"])
     g = np.array([[0.0], [-G0]])
     for _ in range(int(t_end / dt)):
-        T1, u1, d1 = link(pF, pK, vF, vK, s["a_knot"] * s["L"], s["EA"], s["zeta"], mu_FK)
-        T2, u2, d2 = link(pK, pA, vK, vA, (1 - s["a_knot"]) * s["L"], s["EA"], s["zeta"], mu_KA)
+        EAm = np.maximum(s["EA"] * s["el_ok"], 1e-6)
+        T1, u1, d1 = link(pF, pK, vF, vK, s["a_knot"] * s["L"], EAm, s["zeta"], mu_FK)
+        T2, u2, d2 = link(pK, pA, vK, vA, (1 - s["a_knot"]) * s["L"], EAm, s["zeta"], mu_KA)
+        if (s["bk_slack"] > 0).any():   # slack Kevlar backup in parallel with each segment
+            b1, _, _ = link(pF, pK, vF, vK, s["a_knot"] * s["L"] * (1 + s["bk_slack"]), s["bk_EA"], s["zeta"], mu_FK)
+            b2, _, _ = link(pK, pA, vK, vA, (1 - s["a_knot"]) * s["L"] * (1 + s["bk_slack"]), s["bk_EA"], s["zeta"], mu_KA)
+            b1 = np.where(s["bk_slack"] > 0, b1, 0.0); b2 = np.where(s["bk_slack"] > 0, b2, 0.0)
+            bk_max = np.maximum(bk_max, np.maximum(b1, b2))
+            T1 = T1 + b1; T2 = T2 + b2
         T3, u3, d3 = link(pK, pC, vK, vC, s["L_s"], s["EA_s"], s["zeta"], mu_KC)
         newly = (~infl) & (d3 >= 0.98 * s["L_s"]) & (~fail_sep)
         t_ls = np.where(newly, t2, t_ls); infl |= newly
@@ -157,7 +167,7 @@ def simulate(s, t_end=4.0, dt=2.5e-5, rho=1.2, dt1=1e-6, trace=None, rec=None):
                 t_sep_ms=t_sep * 1e3, T_FK=Tm["FK"], T_KA=Tm["KA"], T_KC=Tm["KC"],
                 Tsn_FK=Ts["FK"], Tsn_KA=Ts["KA"], T_max=np.maximum(Tm["FK"], Tm["KA"]),
                 g_F=gF, g_A=gA, zip_ang=ang, recontact_min_m=dmin, v_end=vfin,
-                recontact=(~np.isnan(t_hit)).astype(float), v_hit=v_hit, t_hit=t_hit,
+                recontact=(~np.isnan(t_hit)).astype(float), v_hit=v_hit, t_hit=t_hit, T_backup=bk_max, bk_engaged=(bk_max > 1.0).astype(float),
                 t_ls=t_ls, inflated=infl.astype(float))
 
 
@@ -174,6 +184,8 @@ def main():
     ap.add_argument("--v_dep", type=float, nargs=2, default=None, help="override deploy speed range (stress case)")
     ap.add_argument("--dep", default="../sitl/runs/L_active/runs.csv")
     ap.add_argument("--zeta", type=float, nargs=2, default=[0.05, 0.15], help="cord damping ratio range")
+    ap.add_argument("--backup_slack", type=float, default=0.0, help="parallel Kevlar backup, slack as a fraction of L")
+    ap.add_argument("--elastic_fail", action="store_true", help="elastic broken: only the backup carries load")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -194,7 +206,7 @@ def main():
             summ["pct"][k] = {q: round(float(np.percentile(v, p)), 3) for q, p in (("p50", 50), ("p95", 95), ("p99", 99))}
             summ["pct"][k]["max"] = round(float(v.max()), 3)
     json.dump(summ, open(os.path.join(a.out, "summary.json"), "w"), indent=1)
-    for k in ("P_max_kPa", "F_bulk_N", "v_sep", "fail_sep", "T_max", "Tsn_KA", "T_KC", "g_F", "g_A", "zip_ang", "recontact_min_m", "recontact", "v_hit"):
+    for k in ("P_max_kPa", "F_bulk_N", "v_sep", "fail_sep", "T_max", "Tsn_KA", "T_KC", "g_F", "g_A", "zip_ang", "recontact_min_m", "recontact", "v_hit", "T_backup", "bk_engaged"):
         print(f"{k:16s}", summ["pct"].get(k))
 
 

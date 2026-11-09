@@ -198,6 +198,102 @@ Longer is better: the snatch energy is spread over more stretch.
 - **every recovery element rated ≥ 420 N** (cord, quick link, shroud bundle, both attachment eyes);
 - **proof test of the attachments at 1.25 × limit ≈ 270 N.**
 
+### 5.6 Cord build options and a slack Kevlar backup
+
+This section was added on 8 Nov. The model now supports a parallel Kevlar line on each cord segment, with slack s as a fraction of the elastic length (`rec.py --backup_slack`), and a broken-elastic case (`--elastic_fail`).
+
+Case set: 48" cross canopy (CdS 0.59), 6 m main cord with EA 300 N, 500 runs per case.
+
+| Case | Cord tension p99 / max | Shroud p99 / max | Forward accel p99 / max | Backup loaded? |
+|---|---|---|---|---|
+| Elastic intact, backup slack 0.6, 0.8 or 1.0 | 102 / 128 N | ≈ 134 / 157 N | 23 / 30 g | **Never** (0 / 1 500 runs, including 25–40 m/s deployments) |
+| **Elastic broken**, backup alone, slack 0.6 (9.6 m) | 320 / 404 N | 261 / 305 N | 74 / 98 g | — |
+| **Elastic broken**, backup alone, slack 1.0 (12 m) | 298 / 347 N | — | 71 / 84 g | — |
+| Kevlar only, 4 m (as built) | 459 / 532 N | — | 112 / 124 g | — |
+| Kevlar only, 6 m | 354 / 412 N | — | 88 / 96 g | — |
+| Kevlar only, 8 m | 321 / 406 N | — | 81 / 91 g | — |
+| Tubular or flat nylon, 4 m | 227 / 295 N | 225 / 315 N | 53 / 75 g | — |
+
+The intact cord peaks at about 51 % strain (§5.5), so a backup with **slack ≥ 0.6** stays unloaded in normal flight. With the elastic broken, it turns into a long Kevlar cord, and its loads match the all-Kevlar 8 m case.
+
+**Recommended build [inference]:**
+- **Elastic main:** 6 m relaxed, measured EA 200–500 N (hang test, A-R9). Its rated or usable extension must exceed the backup slack with margin, i.e. ≥ 100 % for s = 0.6–0.8.
+- **Kevlar backup:** in parallel, length 6 m × (1 + s), so 9.6–10.8 m for s = 0.6–0.8. Tie it to the **same** quick links or loops as the elastic. Gather the slack with light breakaway tape or paper ties only, so it cannot carry load or tangle.
+- **Kevlar leader:** 0.3–0.5 m at the motor end, the only part in the ejection gas. Elastic and nylon must not see the hot gas. Use a Nomex or blanket protector for the canopy and elastic.
+- **Ratings at 2.0 × the worst limit, which is the broken-elastic case:**
+  - Kevlar backup and leader ≥ 810 N;
+  - quick links and eyes ≥ 810 N;
+  - shroud and canopy attachment ≥ 610 N.
+  
+  Knots in aramid lose a large fraction of strength [inference; check the maker's knot data], so use sewn or spliced loops, or rate the knotted line higher.
+- **Proof tests (LD-01 T3 / T4) cover the failure case:** attachments at 1.25 × 404 ≈ 510 N; shroud at 1.25 × 305 ≈ 380 N.
+- **Inspection:** elastic degrades with age, UV and heat. Re-do the hang test each season, and replace the elastic if EA drifts by more than about 30 % or the cover is damaged.
+
+**Kevlar only** is the simpler option. If chosen, use ≥ 6 m, rate it ≥ 830 N (2 × 412 N), and accept 90–125 g snatches. Those exceed the FC-V4 ±16 g IMU and need the FC tray checked to that level.
+
+### 5.7 Nylon main with a slack Kevlar backup (no elastic)
+
+This section was added on 8 Nov. James prefers not to rely on elastic.
+
+Case set: 48" cross canopy (CdS 0.59), nylon EA U(1.5, 5) kN (A-R9, assumed), 500 runs per case.
+
+| Case | Cord tension p99 / max | Shroud p99 / max | Forward accel p99 / max | Aft accel p99 / max |
+|---|---|---|---|---|
+| Nylon 4 m | 213 / 363 N | 200 / 215 N | 49 / 86 g | 57 / 61 g |
+| Nylon 6 m | 177 / 349 N | 188 / 222 N | 42 / 82 g | 44 / 62 g |
+| **Nylon 8 m** | **189 / 242 N** | **201 / 246 N** | **46 / 57 g** | **38 / 42 g** |
+| Nylon 6 m + Kevlar slack 0.15 or 0.25, nylon intact | Backup never loaded (0 / 1 500 runs, including 25–40 m/s deployments). Peak nylon strain 8.6 % | | | |
+| Nylon 6 m **broken**, Kevlar backup alone (6.9–7.5 m) | 328 / 422 N | 240 / 294 N | 80 / 100 g | — |
+
+**Slack window [inference].** The backup must stay unloaded in normal flight, so the slack must exceed the nylon's peak strain (≤ 9 % here; more if the real EA is lower). It must also engage before the nylon fails, so the slack must be below the nylon's elongation at break: check the maker's figure, typically some tens of percent for nylon. **s = 0.15–0.20** fits both. Measure the nylon's EA with the hang test, then confirm that slack > 1.5 × the peak strain from a re-run.
+
+**Recommended nylon build [inference]:**
+- **Nylon main:** 6–8 m. 8 m bounds the worst case best (max 242 N, 57 g). Prefer the lightest flat or tubular nylon whose rating is ≥ 700 N: a lighter section is softer and lowers the snatch. Check that 8 m plus the canopy packs into the 60 mm × 0.40 m bay.
+- **Kevlar backup:** 1.15–1.20 × the nylon length, in parallel, on the same quick links, with the slack gathered by breakaway tape.
+- **Kevlar leader:** 0.3–0.5 m at the motor end. Nylon melts in ejection gas, so the leader and a protector are mandatory.
+- **Ratings (2 × worst limit, covering the broken-nylon case):**
+  - nylon ≥ 700 N;
+  - Kevlar backup, leader, quick links and eyes ≥ 850 N;
+  - shroud and canopy attachment ≥ 600 N;
+  - sewn or spliced loops in the aramid.
+- **Proof tests:** attachments at 1.25 × 422 ≈ 530 N; shroud at 1.25 × 294 ≈ 370 N.
+- **What the backup buys with nylon:** nylon does not age like elastic, so the backup mainly covers heat or abrasion damage and a bad knot or sewn joint. It is cheap insurance with no cost in normal flight.
+
+**Compared with elastic (§5.6):** about 2× the tension (p99 177–189 N against 102 N) and about 2× the section g (p99 about 40–46 g against 23 g). Still 2–3× better than all-Kevlar at the same length. **The FC-V4 ±16 g IMU clips in every option.** The FC tray and battery retention must be checked to about 60 g (nylon 8 m) or 100 g (the broken-main case).
+
+### 5.8 Sizing the nylon + Kevlar build against published ratings
+
+This section was added on 8 Nov.
+
+**Stiffness check.** Real 3/16" tubular nylon (rated 375 lb ≈ 1.67 kN) at roughly 20–30 % elongation at break implies EA ≈ 6–8 kN. That is stiffer than the U(1.5, 5) kN assumed in §5.7 **[inference]**. The 48" canopy was re-run at EA 7 kN (500 runs):
+
+| Nylon, EA 7 kN | Cord p99 / max | Shroud p99 / max | Forward g p99 / max | Peak strain | Backup (s = 0.2) loaded |
+|---|---|---|---|---|---|
+| 6 m | 234 / 361 N | 210 / 259 N | 56 / 85 g | — | never |
+| **8 m** | **230 / 277 N** | **226 / 274 N** | **55 / 66 g** | 4 % | never |
+
+**Required breaking strength** (2 × the worst limit, including the broken-main case of 422 N), against published ratings **[fact: maker listings]**:
+
+| Element | Need | Candidate | Published rating | Margin on need |
+|---|---|---|---|---|
+| Nylon main, 8 m | ≥ 700 N | 3/16" tubular nylon, sewn loops (LOC Precision lists it for 2–32 oz rockets; recovered mass here is 29.6 oz) | 375 lb ≈ 1.67 kN ([LOC](https://locprecision.com/product/shock-cords)) | 2.4× |
+| Kevlar backup, about 9.6 m (s = 0.2), and the 0.3–0.5 m leader | ≥ 850 N | 1/8" tubular Kevlar, sewn loops | 950 lb ≈ 4.2 kN ([LOC](https://locprecision.com/product/tubular-kevlar-shock-cord)); 1 600 lbf from MAC Performance | ≥ 5× (≥ 2.5× even if knotted at an assumed −50 %) |
+| Quick links / maillons | ≥ 850 N **breaking** | Stainless maillon with a published breaking load (the marked working load is typically a fraction of break) | Check the maker's rating | — |
+| Canopy shroud bundle + swivel | ≥ 600 N | Top Flight Ultra-X 48" | Not published in the listings found. **Ask the maker or pull-test** | — |
+| Bulkhead eye / aft anchor in printed parts | Proof test 530 N | — | **The weak link: test it** (LD-01 T3) | — |
+
+**Not adequate as the backup:** 100–200 lb Kevlar thread (0.45–0.9 kN), even before any knot loss. Check the 1.1 mm "Kevlar thread" in the OpenRocket file against its rating; if unknown, replace it.
+
+**Avoid larger nylon** (3/8", 1 020 lb). It is stiffer, so it raises the snatch load and the section g, and it packs larger, with no benefit at this mass.
+
+**Packing estimate [inference]:**
+- 8 m of 3/16" tubular nylon is about 60 cm³ flattened;
+- 9.6 m of 1/8" Kevlar is about 45 cm³;
+- the bay is about 1 130 cm³ (60 mm × 0.40 m);
+- a 48" canopy plus protector probably takes 250–350 cm³.
+
+It should fit with gas space left. Check by packing it.
+
 ## 6. Parachute size and descent
 
 Figure: `rec_descent.png`.

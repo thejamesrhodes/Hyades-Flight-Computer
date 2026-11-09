@@ -16,17 +16,17 @@ The order is by what unblocks the most analysis. Each ground test closes named a
 | # | Decision | Options | Ref |
 |---|---|---|---|
 | D1 | Roll requirements after the CG correction (2 / 1 200 corner failures) | (a) R5a 260 °/s and R5b 50 °/s; (b) keep them and accept 0.17 %; (c) wait for the bench data (recommended, with (a) in the interim) | LD-01 §3.2 |
-| D2 | Recovery configuration | 0.9 m canopy, plus a 6 m cord with EA ≈ 300 N (and a Kevlar leader at the motor), or keep the 0.6 m chute and 4 m Kevlar | REC-01 §1 |
+| D2 | Recovery configuration | **Leaning (9 Nov):** 48" Ultra-X cross canopy; 8 m of 3/16" tubular nylon with a parallel 1/8" tubular Kevlar backup at 15–20 % slack; a Kevlar leader at the motor end | REC-01 §5.7–5.8 |
 | D3 | Flight-1 motor and delay | From the six-motor shortlist; sets `DET_T_APOGEE_MAX_S` and the delay | MC-01 §4, REC-01 §7 |
 
 ## 2. Ground tests, in order
 
 | # | Test | Closes | Then |
 |---|---|---|---|
-| G1 | **Servo laser bench:** τ_d, f_N/ζ with a small-amplitude chirp, dead band, lash, step response at 6.0 / 7.4 / 8.4 V, dither A/B | MC-01 A17–A21 | `adr004_margin_check.m` and an MC re-run. Possibly c = 18–20. Settles D1. |
+| G1 | **Servo laser bench:** τ_d, f_N/ζ with a small-amplitude chirp, dead band, lash, step response at 6.0 / 7.4 / 8.4 V, dither A/B | MC-01 A17–A21 | `adr004_margin_check.m` and an MC re-run. Possibly c = 18–20. Settles D1. If the dead band is below 0.15°, re-run ALLOC-01 variant E1 |
 | G2 | **Inertia:** trifilar Ixx (forward body), bifilar I_t (whole vehicle). **Weigh and balance** each section | A1, A2, A4, LD-01 A-L3 | MC re-run |
 | G3 | **Fin can:** cant jig plus laser (≤ 0.25° net and per fin); bearing spin-down (T_c ≤ 6 mN m, at 0 and 20 °C) | A10–A12 (lock-in, friction) | Pass/fail against the build tolerance |
-| G4 | **Canard zero** ≤ 0.1° by laser; polarity check (FDS-01 §6.6) | A9 | — |
+| G4 | **Canard zero** ≤ 0.1° by laser; polarity check (FDS-01 §6.6) | A9 | Enter each canard's measured zero in `FIN_ZERO_OFFSET_DEG`. Uncalibrated 0.5–3° errors cost +27 % coast roll RMS p95 (ALLOC-01) |
 | G5 | **Tap test** of the assembled airframe, then **static fire of a smaller motor** in the real fin can with FC-V4 capturing IMU at 896 Hz, LPF wide, clip flags logged | A24 (vibration), LD-01 A-L2 | Replace synthetic vibration in the MC; check the clip budget and LPF corner |
 | G6 | **Recovery inputs:** weigh the reload's ejection charge; spring-scale the coupler fit; hang-test the cord for EA | REC-01 A-R1, A-R4, A-R9 | Re-run `rec_campaign.sh` |
 | G7 | **Proof tests:** motor retention and bulkhead at 860 N (aft-ward and out-ward); cord and shroud attachments at 1.25 × limit (270 N with the recommended cord) | LD-01 T1–T4 | — |
@@ -34,8 +34,23 @@ The order is by what unblocks the most analysis. Each ground test closes named a
 | G9 | **Drop test** of the assembled sections at the descent-rate-equivalent height (3.3 m now, 1.5 m with the 0.9 m canopy) | LD-01 T7, A-L4 | Settles D2 if the 0.6 m chute is kept |
 | G10 | **Flight-build HITL campaign:** build with `CFG_FLIGHT_BUILD=1` (bench features compiled out), full HITL-02 case list, chosen motor | Configuration as flown | Flight readiness review |
 | G11 | **Pad end-to-end:** power-on to READY on the rail, the log-space inhibit, a `faults clear` drill, a phase-word injection on the pad (T16 → LOCKOUT), LED and buzzer indications | STM-01 T3, T13, T16 | Pad procedure sheet |
+| G12 | **Static margin:** measure the CG (balance, loaded with the motor) and check the CP against OpenRocket/Barrowman using the measured as-built geometry (fin and canard dimensions, nose shape) | SAF-01 bound, MC-01 A4/A6 | Re-run `manoeuvre_sweep.py`; finalise the SAF-01 statement |
+| G13 | **Canard effectiveness Cl_δ:** a fan or car-roof test of the forward body on a roll bearing (deflect the canards, measure the steady roll torque or spin rate at a known airspeed). A pitch-plane force check gives CN_δ for SAF-01 | CDS-01, MC-01 A7 (±30 %), SAF-01 | MC and SAF-01 re-run with the measured value. Narrows the largest single uncertainty in the roll loop |
+| G14 | **Canopy CdS:** drop the chosen canopy (48" Ultra-X) with about 840 g from ≥ 10 m and time the steady fall (or tow it on a car at a known speed with a spring scale) | REC-01 A-R6 | Descent rate, drift, REC-01 re-run |
+| G15 | **Cord stiffness:** hang test of the actual nylon (and the Kevlar backup) for EA; confirm backup slack > 1.5 × the predicted peak strain | REC-01 A-R9, §5.8 | `rec.py` re-run with the measured EA |
+| G16 | **Fin-can spin test in airflow** (fan or car roof): measure the free-spin rate against speed, to check the 1.13 × \|cant°\| × f_pitch relation and the bearing friction under load | MC-01 FM3/FM4, lock-in | Validates the lock-in model |
+| G17 | **PWM output check (8 MHz tick):** scope one fin output for the 1520 µs centre, 0.125 µs steps and the 6 ms fallback period, and check all four pulses start together | ALLOC-01 §7 | — |
 
-G1–G4 need no motor. G5, G8 and G9 need the airframe assembled.
+G1–G4, G12–G15 and G17 need no motor. G5, G8 and G9 need the airframe assembled. G13 and G16 need a steady airflow (a car roof at a measured speed is the cheapest option; a 15–20 m/s run gives about 150–250 Pa, so the canard loads are small but measurable).
+
+**Suggested order:**
+1. Bench, no airflow: G2, G3, G4, G12, G17, G1.
+2. Recovery inputs: G6, G14, G15, then G7.
+3. Airflow: G13, G16.
+4. Assembled airframe: G5, then G8 and G9.
+5. G10 and G11 last, on the flight article.
+
+After each block, re-run the affected simulation (MC-01 / `mc.py`, `rec.py`, `manoeuvre_sweep.py`) with the measured values.
 
 ## 3. Development
 

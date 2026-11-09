@@ -29,6 +29,7 @@
  * y yaw (board.h §1). Stations x_* are measured AFT from the nose tip.
  * ============================================================================ */
 #include "flight.h"
+#include "alloc.h"
 #include "board.h"
 #include <math.h>
 #include <stdio.h>
@@ -92,6 +93,9 @@ typedef struct {
     int    gps_on; double gps_sd;
     /* firmware switches */
     int    shadow; int fin_deg;
+    /* worst-case manoeuvre study: canards forced to a fixed pitch deflection */
+    double force_deg, force_t; int force_mode;
+    int pwm_quant;   /* 1: fin commands quantised to the PWM tick exactly as PWM_SetFin (ALLOC-01) */
 } Cfg;
 static Cfg C;
 
@@ -129,6 +133,7 @@ static void cfg_defaults(void)
     C.fault_fin = -1; C.fault_t = 1e9; strcpy(C.fault_kind, "none");
     C.gps_on = 1; C.gps_sd = 4.0;
     C.fin_deg = (int)FIN_DEFLECT_DEG;
+    C.pwm_quant = 1;
 }
 
 static void cfg_set(const char *k, const char *v)
@@ -147,7 +152,7 @@ static void cfg_set(const char *k, const char *v)
     D(ground_k) D(ground_c) D(collapse_t) D(chute_delay) D(canopy_swing) D(chute_cd_a) D(cord_len) D(arw) D(vrw) D(acc_bias) D(gyro_bias) D(sf) D(misal_deg) D(gsens)
     D(vib_boost_g) D(vib_res_g) D(vib_res_hz) D(vib_gyro_dps) D(vib_coast_g) D(vib_chute_g)
     D(sv_rate) D(sv_wn) D(sv_zeta) D(sv_tau) D(sv_db) D(sv_lash) D(sv_res) D(sv_travel) D(sv_volt_k) D(sv_extra)
-    I(fault_fin) D(fault_t) D(fault_val) I(gps_on) D(gps_sd) I(shadow) I(fin_deg)
+    I(fault_fin) D(fault_t) D(fault_val) I(gps_on) D(gps_sd) I(shadow) I(fin_deg) D(force_deg) D(force_t) I(force_mode) I(pwm_quant)
     fprintf(stderr, "unknown key %s\n", k); exit(2);
 #undef D
 #undef I
@@ -342,6 +347,7 @@ typedef struct {
     V3 wind_turb; double chute_open, swing_x, swing_y;
     double apogee, t_apogee, v_burn; double imp_g;
     double dep_V, dep_gam, dep_h, dep_aoa, dep_w, v_desc;
+    double tilt_max, gam_min_pow, gam_min, x_apo, x_dep, x_land, t_tilt90;
 } Plant;
 static Plant P;
 
@@ -652,7 +658,19 @@ static void plant_step(double dt)
     P.f_spec = fb;
     /* events */
     if (P.ignited) {
-        if (P.p.z > P.apogee) { P.apogee = P.p.z; P.t_apogee = P.t - P.t_ign; }
+        if (P.p.z > P.apogee) { P.apogee = P.p.z; P.t_apogee = P.t - P.t_ign; P.x_apo = sqrt((P.p.x * P.p.x) + (P.p.y * P.p.y)); }
+        if (P.ignited && !P.chute && !P.on_rail) {                       /* trajectory envelope (manoeuvre study) */
+            const V3 ax = qrot(P.q, v3(0, 0, 1));
+            const double tilt = acos(fmax(-1.0, fmin(1.0, ax.z))) * R2D;
+            if (tilt > P.tilt_max) { P.tilt_max = tilt; }
+            if ((tilt >= 90.0) && (P.t_tilt90 <= 0)) { P.t_tilt90 = P.t - P.t_ign; }
+            const double sp = nrm(P.v);
+            if (sp > 5.0) {
+                const double gam = asin(fmax(-1.0, fmin(1.0, P.v.z / sp))) * R2D;
+                if (thrust() > 0) { if (gam < P.gam_min_pow) { P.gam_min_pow = gam; } }
+                if (gam < P.gam_min) { P.gam_min = gam; }
+            }
+        }
         if (P.chute && (P.p.z < 20.0) && (P.p.z > 10.0)) { P.v_desc = -P.v.z; }
         if (!P.chute && (P.t_apogee > 0) && (P.v.z < 0) && (P.t - P.t_ign > P.t_apogee + C.chute_delay)) {
             P.chute = 1; P.t_chute = P.t;
@@ -660,7 +678,7 @@ static void plant_step(double dt)
                 double rho_d, a_d; isa(C.site_elev + P.p.z, &rho_d, &a_d); (void)rho_d; (void)a_d;
                 const V3 va = sub(P.v, wind);
                 P.dep_V = nrm(va); P.dep_gam = atan2(va.z, sqrt((va.x * va.x) + (va.y * va.y))) * R2D;
-                P.dep_h = P.p.z; P.dep_w = sqrt((P.w.x * P.w.x) + (P.w.y * P.w.y)) * R2D;
+                P.dep_h = P.p.z; P.x_dep = sqrt((P.p.x * P.p.x) + (P.p.y * P.p.y)); P.dep_w = sqrt((P.w.x * P.w.x) + (P.w.y * P.w.y)) * R2D;
                 const V3 ax = qrot(P.q, v3(0, 0, 1));
                 P.dep_aoa = acos(fmax(-1.0, fmin(1.0, dot(ax, va) / fmax(P.dep_V, 1e-6)))) * R2D;
             }
@@ -701,7 +719,7 @@ int main(int argc, char **argv)
     }
     seed_rng(C.seed);
     load_motor(C.motor); load_aero(C.aero);
-    memset(&P, 0, sizeof P);
+    memset(&P, 0, sizeof P); P.gam_min_pow = 90.0; P.gam_min = 90.0;
     P.on_rail = 1;
     {   /* rail attitude */
         const double tl = C.rail_tilt * D2R, az = C.rail_az * D2R;
@@ -754,12 +772,28 @@ int main(int argc, char **argv)
     double defl_max = 0, sat_n = 0, act_n = 0, qhat_e2 = 0, qhat_emax = 0, n_q = 0, pcan_max = 0, ratio_max = 0;
     double nlat_max = 0, qalpha_max = 0, t_ready = -1, p_apo = 0, h_err_apo = 0, trim_last = 0, wl_coast_max = 0;
     double p_coast_end = 0, mach_max = 0, body_ratio_max = 0;
+    double p2_boost = 0, n_boost = 0, wl2_coast = 0, pyd2 = 0, n_pyd = 0, act_sum = 0, act_t = 0, dprev[4] = { 0, 0, 0, 0 };
     int frames = 0; t_frame = P.t;
     double t_next_frame = P.t;
     while (P.t < C.t_max + C.pad_hold + 60) {
         const double dt = (P.ignited && !P.chute) ? C.dt_asc : C.dt_desc;
         /* servo command: applied sv_extra after the frame (compute + pulse width read) */
         if ((t_queue >= 0) && (P.t >= t_queue)) { memcpy(cmd_live, cmd_queued, sizeof cmd_live); t_queue = -1; }
+        if ((C.force_mode > 0) && P.ignited && !P.chute && ((P.t - P.t_ign) >= C.force_t)) {
+            /* fins 0/2 are a pitch pair (+d / -d); mode 2 adds 1/3 for the diagonal (sqrt 2 more force) */
+            const double f = C.force_deg * D2R;
+            if (C.force_mode <= 2) {
+                cmd_live[0] = f; cmd_live[2] = -f;
+                cmd_live[1] = (C.force_mode == 2) ? f : 0.0; cmd_live[3] = (C.force_mode == 2) ? -f : 0.0;
+            } else {
+                /* adversarial resonant pumping: bang-bang against the TRUE body rate, so the canard moment always
+                 * adds energy to the pitch/yaw oscillation (negative damping). +d0 gives M.x < 0 and +d1 gives
+                 * M.y < 0 (canards ahead of the CG). Mode 3: pitch pair only; mode 4: both pairs. */
+                const double s0 = (P.w.x >= 0.0) ? -1.0 : 1.0, s1 = (P.w.y >= 0.0) ? -1.0 : 1.0;
+                cmd_live[0] = s0 * f; cmd_live[2] = -s0 * f;
+                cmd_live[1] = (C.force_mode == 4) ? s1 * f : 0.0; cmd_live[3] = (C.force_mode == 4) ? -s1 * f : 0.0;
+            }
+        }
         for (int i = 0; i < 4; i++) {
             if ((i == C.fault_fin) && P.ignited && (P.t - P.t_ign >= C.fault_t) && (P.sv[i].fault == 0)) {
                 P.sv[i].fault = !strcmp(C.fault_kind, "stuck") ? 1 : !strcmp(C.fault_kind, "hardover") ? 2 :
@@ -793,7 +827,10 @@ int main(int argc, char **argv)
                 in.gps_alt_msl = (float)(C.site_elev + P.p.z + (C.gps_sd * nrand()));
             } else if (C.gps_on) { in.gps_enabled = true; in.gps_alive = true; }
             Flight_Step(&F, &in, (float)frame_dt);
-            for (int i = 0; i < 4; i++) { cmd_queued[i] = F.fin[i] * C.fin_deg * D2R; }
+            for (int i = 0; i < 4; i++) {
+                const double fn = C.pwm_quant ? (double)Alloc_TicksToNorm(Alloc_NormToTicks(F.fin[i])) : (double)F.fin[i];
+                cmd_queued[i] = fn * C.fin_deg * D2R;
+            }
             t_queue = P.t + C.sv_extra;
             const Phase ph = Flight_Phase(&F);
             if ((ph == PH_READY) && (t_ready < 0)) { t_ready = P.t; }
@@ -804,9 +841,9 @@ int main(int argc, char **argv)
                 const double pz = fabs(P.w.z) * R2D;
                 const double wl = sqrt((P.w.x * P.w.x) + (P.w.y * P.w.y)) * R2D;
                 if (!P.on_rail) {
-                    if (thrust() > 0) { if (pz > p_max_boost) { p_max_boost = pz; } }
+                    if (thrust() > 0) { if (pz > p_max_boost) { p_max_boost = pz; } p2_boost += pz * pz; n_boost++; }
                     else if (P.v.z > 0) {
-                        if (pz > p_max_coast) { p_max_coast = pz; } p2_coast += pz * pz; n_coast++;
+                        if (pz > p_max_coast) { p_max_coast = pz; } p2_coast += pz * pz; n_coast++; wl2_coast += wl * wl;
                         if (wl > wl_coast_max) { wl_coast_max = wl; } p_coast_end = P.w.z * R2D;
                     }
                     if ((P.v.z > 0) && (P.qbar > 500.0) && (P.alpha * R2D > aoa_max)) { aoa_max = P.alpha * R2D; }
@@ -825,6 +862,13 @@ int main(int argc, char **argv)
                         const double r = fabs(P.pc) / sqrt(kk); if (r > ratio_max) { ratio_max = r; }
                         const double rb = fabs(P.w.z) / sqrt(kk); if (rb > body_ratio_max) { body_ratio_max = rb; }
                     }
+                    if (P.v.z > 0) {
+                        const double dp = 0.5 * (P.delta[0] - P.delta[2]) * R2D, dy = 0.5 * (P.delta[1] - P.delta[3]) * R2D;
+                        pyd2 += (dp * dp) + (dy * dy); n_pyd++;
+                        if (act_t > 0) { for (int i = 0; i < 4; i++) { act_sum += 0.25 * fabs(P.delta[i] - dprev[i]) * R2D; } }
+                        act_t += frame_dt;
+                    }
+                    for (int i = 0; i < 4; i++) { dprev[i] = P.delta[i]; }
                     for (int i = 0; i < 4; i++) {
                         const double dd = fabs(P.delta[i]) * R2D; if (dd > defl_max) { defl_max = dd; }
                         act_n++; if (fabs(F.fin_cmd[i] * C.fin_deg * D2R) >= 0.999 * C.sv_travel) { sat_n++; }
@@ -859,7 +903,7 @@ int main(int argc, char **argv)
            "ok_seq=%d phase_bad=%d p_max_boost=%.1f p_max_coast=%.1f p_rms_coast=%.1f p_coast_end=%.1f p_apogee=%.1f "
            "wlat_max=%.1f wlat_coast_max=%.1f aoa_max=%.2f qalpha_max=%.0f nlat_max=%.2f defl_max=%.2f sat_frac=%.4f "
            "qhat_rms=%.2f qhat_max=%.2f h_err_apo=%.2f pcan_max=%.0f can_pitch_ratio=%.2f impact_g=%.1f trim=%.4f "
-           "reached_ready=%d final_phase=%u body_pitch_ratio=%.2f\n",
+           "reached_ready=%d final_phase=%u body_pitch_ratio=%.2f p_rms_boost=%.2f wl_rms_coast=%.2f pyd_rms=%.4f sv_act=%.3f ",
            (P.t_ground > 0) ? P.t_ground - P.t_ign : -1, (unsigned long long)C.seed, C.motor, P.apogee, P.t_apogee, q_max, mach_max,
            ev_seen[3] ? ev_t[3] - tl_true : -1, ev_seen[4] ? ev_t[4] : -1, MO.tb,
            ev_seen[5] ? ev_t[5] : -1, ev_seen[6] ? ev_t[6] : -1, (P.t_rest > 0) ? P.t_rest - P.t_ign : -1,
@@ -867,7 +911,11 @@ int main(int argc, char **argv)
            p_max_boost, p_max_coast, (n_coast > 0) ? sqrt(p2_coast / n_coast) : 0, p_coast_end, p_apo,
            wlat_max, wl_coast_max, aoa_max, qalpha_max, nlat_max, defl_max, (act_n > 0) ? sat_n / act_n : 0,
            (n_q > 0) ? sqrt(qhat_e2 / n_q) : 0, qhat_emax, h_err_apo, pcan_max, ratio_max, P.imp_g, trim_last,
-           t_ready >= 0, Phase_Index(Flight_Phase(&F)), body_ratio_max);
+           t_ready >= 0, Phase_Index(Flight_Phase(&F)), body_ratio_max, (n_boost > 0) ? sqrt(p2_boost / n_boost) : 0,
+           (n_coast > 0) ? sqrt(wl2_coast / n_coast) : 0, (n_pyd > 0) ? sqrt(pyd2 / n_pyd) : 0, (act_t > 0) ? act_sum / act_t : 0);
+    P.x_land = sqrt((P.p.x * P.p.x) + (P.p.y * P.p.y));
+    printf("tilt_max=%.1f t_tilt90=%.2f gam_min_pow=%.1f gam_min=%.1f x_apo=%.1f x_dep=%.1f x_land=%.1f ", P.tilt_max, P.t_tilt90,
+           P.gam_min_pow, P.gam_min, P.x_apo, P.x_dep, P.x_land);
     printf("ld_resid=%.4f ld_lump_It=%.4f dep_V=%.2f dep_gam=%.1f dep_h=%.1f dep_aoa=%.1f dep_w=%.1f v_desc=%.2f", ld_resid_max, ld_lump_It,
            P.dep_V, P.dep_gam, P.dep_h, P.dep_aoa, P.dep_w, P.v_desc);
     for (int s = 0; s < NLD; s++) {

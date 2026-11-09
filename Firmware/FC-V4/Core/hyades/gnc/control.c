@@ -134,7 +134,7 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
 #endif
         }
     }
-#if CTRL_DITHER_ON
+#if CTRL_DITHER_ON && !CTRL_DITHER_NULL
     /* Dither (Matlab P.Dither, ADR-004 §3.6): a square wave on the command,
      * +a +a -a -a at the frame rate (FRAME_HZ / CTRL_DITHER_PERIOD_N = 50 Hz at
      * 200 Hz). It keeps the servo's internal position error moving across its
@@ -146,6 +146,7 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
     c->dither = (((c->dither_k / (CTRL_DITHER_PERIOD_N / 2u)) & 1u) == 0u) ? CTRL_DITHER_AMP_RAD : -CTRL_DITHER_AMP_RAD;
     c->dither_k++;
 #else
+    /* off, or CTRL_DITHER_NULL: the allocator dithers on the null axis (alloc.c) */
     c->dither = 0.0f;
 #endif
     return clampf(d_damp + c->trim + c->dither, CTRL_ROLL_TRAVEL_RAD);

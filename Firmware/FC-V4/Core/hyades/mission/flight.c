@@ -51,6 +51,7 @@ void Flight_Init(Flight *f, const NavCfg *nav, const DetectCfg *det, uint32_t re
     Phase_Init(&f->ph);
     Fdir_Init(&f->fdir);
     Ctrl_Init(&f->ctrl);
+    Alloc_Init(&f->alloc);
     IEKF_Init(&f->iekf);
     Nav_Init(&f->nav, nav);
     Detect_Init(&f->det, det);
@@ -207,5 +208,7 @@ void Flight_Step(Flight *f, const FlightIn *in, float dt)
     monitor_and_arbitrate(f, in, dt);
     Ctrl_SetQbar(&f->ctrl, f->nav.qbar, Nav_QValid(&f->nav) && (f->ctrl.mode == CTRL_MODE_FULL));
     Ctrl_Update(&f->ctrl, f->iekf.q, f->iekf.omega, f->gyro_rad, dt, f->fin_cmd);
-    for (uint32_t k = 0u; k < 4u; k++) { f->fin[k] = f->shadow ? 0.0f : f->fin_cmd[k]; }
+    float fin_alloc[4];
+    Alloc_Apply(&f->alloc, f->fin_cmd, f->ctrl.mode != CTRL_MODE_OFF, fin_alloc);
+    for (uint32_t k = 0u; k < 4u; k++) { f->fin[k] = f->shadow ? 0.0f : fin_alloc[k]; }
 }
