@@ -5,27 +5,30 @@
 
 static const Phase k_phases[PHASE_COUNT] = {
     PH_BOOT, PH_CALIBRATE, PH_SETTLING, PH_READY, PH_BOOST,
-    PH_COAST, PH_DESCENT, PH_LANDED, PH_LOCKOUT, PH_CATO_SAFE
+    PH_COAST, PH_DESCENT, PH_LANDED, PH_LOCKOUT, PH_CATO_SAFE, PH_ALIGN
 };
 static const char *const k_names[PHASE_COUNT] = {
     "BOOT", "CAL", "SETTLE", "READY", "BOOST",
-    "COAST", "DESCENT", "LANDED", "LOCKOUT", "CATO"
+    "COAST", "DESCENT", "LANDED", "LOCKOUT", "CATO", "ALIGN"
 };
 
 /* Allowed transitions: k_allowed[from] is a bit mask over target indices. */
 #define B(p) (1u << (p))
-enum { I_BOOT, I_CAL, I_SETTLE, I_READY, I_BOOST, I_COAST, I_DESC, I_LANDED, I_LOCK, I_CATO };
+enum { I_BOOT, I_CAL, I_SETTLE, I_READY, I_BOOST, I_COAST, I_DESC, I_LANDED, I_LOCK, I_CATO, I_ALIGN };
 static const uint16_t k_allowed[PHASE_COUNT] = {
     [I_BOOT]   = B(I_CAL)   | B(I_LOCK),
     [I_CAL]    = B(I_SETTLE)| B(I_LOCK),
-    [I_SETTLE] = B(I_READY) | B(I_BOOST) | B(I_LOCK),  /* STM-01 F3: liftoff while not READY */
-    [I_READY]  = B(I_SETTLE)| B(I_BOOST) | B(I_LOCK),
+    [I_SETTLE] = B(I_READY) | B(I_BOOST) | B(I_LOCK) | B(I_ALIGN),  /* STM-01 F3: liftoff while not READY */
+    [I_READY]  = B(I_SETTLE)| B(I_BOOST) | B(I_LOCK) | B(I_ALIGN),
     [I_BOOST]  = B(I_COAST) | B(I_CATO),
     [I_COAST]  = B(I_DESC)  | B(I_CATO),
     [I_DESC]   = B(I_LANDED),
     [I_LANDED] = 0u,
     [I_LOCK]   = 0u,
     [I_CATO]   = B(I_LANDED),
+    /* CAL-01: left only by save/cancel (to SETTLING: the full READY hold again),
+     * a HARD fault, or a liftoff, which is sequenced as from SETTLING (F3). */
+    [I_ALIGN]  = B(I_SETTLE)| B(I_BOOST) | B(I_LOCK),
 };
 #undef B
 

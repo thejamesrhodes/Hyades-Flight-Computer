@@ -23,7 +23,7 @@ import threading
 import time
 
 VID, PID = 0x0483, 0x5740
-PHASES = ("BOOT", "CAL", "SETTLE", "READY", "BOOST", "COAST", "DESCENT", "LANDED", "LOCKOUT", "CATO")
+PHASES = ("BOOT", "CAL", "SETTLE", "READY", "BOOST", "COAST", "DESCENT", "LANDED", "LOCKOUT", "CATO", "ALIGN")
 IN_FLIGHT = ("BOOST", "COAST", "DESCENT")             # Phase_InFlight(): firmware refuses fw/reboot/erase
 ADVISORY = ("gps_link",)                             # SEV_INFO in fdir.c: reported, never acted on
 MONITORS = ("imu_read", "accel_rng", "gyro_rng", "loop_time", "overrun", "est_nan", "est_tilt", "gps_link")
@@ -134,13 +134,13 @@ def parse_status(line: str) -> dict | None:
     out.update({k: int(d[k]) for k in _INTS})
     for k in ("h", "vz", "qbar"):                  # NAV-01 fields (newer firmware)
         out[k] = num(d[k]) if d.get(k) is not None else float("nan")
-    out["cal"] = d.get("cal")                      # CAL-01: OK / NONE / ALIGN (None: older firmware)
+    out["cal"] = d.get("cal")                      # CAL-01: OK / NONE / CLIPPED / ALIGN (None: older firmware)
     return out
 
 
 _CAL = re.compile(
     r"^CAL state=(?P<state>\w+) stored=(?P<stored>\w+) seq=(?P<seq>\d+) zero=(?P<zero>\S+) "
-    r"trial=(?P<trial>\S+) journal=(?P<used>\d+)/(?P<slots>\d+) idle_s=(?P<idle>\d+) ready=(?P<ready>\w+)")
+    r"trial=(?P<trial>\S+) journal=(?P<used>\d+)/(?P<slots>\d+) auth=(?P<auth>\w+) ready=(?P<ready>\w+)")
 
 
 def parse_cal(line: str) -> dict | None:
@@ -156,7 +156,7 @@ def parse_cal(line: str) -> dict | None:
     if len(zero) != 4 or len(trial) != 4:
         return None
     return {"state": m["state"], "stored": m["stored"], "seq": int(m["seq"]), "zero": zero, "trial": trial,
-            "used": int(m["used"]), "slots": int(m["slots"]), "idle_s": int(m["idle"]), "ready": m["ready"]}
+            "used": int(m["used"]), "slots": int(m["slots"]), "auth": m["auth"], "ready": m["ready"]}
 
 
 def parse_event(line: str) -> dict | None:

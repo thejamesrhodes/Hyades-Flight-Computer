@@ -251,12 +251,12 @@ class CanardAlignment(unittest.TestCase):
     """CAL-01: 'cal' replies, status token and the simulator's session rules (mirror of app.c)."""
 
     LINE = ("CAL state=ALIGN stored=OK seq=3 zero=+0.120,-0.040,+0.000,+0.310 "
-            "trial=+0.140,-0.040,+0.000,+0.310 journal=3/128 idle_s=55 ready=held")
+            "trial=+0.140,-0.040,+0.000,+0.310 journal=3/128 auth=full ready=held")
 
     def test_parse_cal(self):
         c = link.parse_cal(self.LINE)
-        self.assertEqual((c["state"], c["stored"], c["seq"], c["used"], c["slots"], c["ready"]),
-                         ("ALIGN", "OK", 3, 3, 128, "held"))
+        self.assertEqual((c["state"], c["stored"], c["seq"], c["used"], c["slots"], c["auth"], c["ready"]),
+                         ("ALIGN", "OK", 3, 3, 128, "full", "held"))
         self.assertEqual(c["trial"], [0.14, -0.04, 0.0, 0.31])
         self.assertIsNone(link.parse_cal("CAL state=ALIGN stored=OK seq=3 zero=+0.1,+0.2 trial=x"))
         self.assertIsNone(link.parse_cal("ERR cal: no session ('cal begin' first)"))
@@ -292,29 +292,37 @@ class CanardAlignment(unittest.TestCase):
         self.assertEqual(self.ask("cal")["stored"], "NONE")
         self.assertEqual(self.ask("cal save")["state"], "IDLE")             # refused: no session
         self.assertEqual(self.ask("cal begin")["state"], "ALIGN")
-        c = self.ask("cal jog 0 +0.10")
-        self.assertEqual(c["trial"][0], 0.1)
-        self.assertEqual(self.ask("cal jog 0 +2.5")["trial"][0], 0.1)       # over the 2 deg step: refused
-        self.assertEqual(self.ask("cal set 3 -10.5")["trial"][3], 0.0)      # over the 10 deg limit: refused
+        self.assertEqual(self.dev.phase, "ALIGN")
+        self.assertEqual(self.ask("cal jog 0 +0.10")["trial"][0], 0.1)
+        self.assertEqual(self.ask("cal jog 0 +10.5")["trial"][0], 0.1)      # over the 10 deg step: refused
+        self.assertEqual(self.ask("cal set 3 -90.5")["trial"][3], 0.0)      # over 90 deg: refused
+        self.assertEqual(self.ask("cal set 2 -45")["trial"][2], -45.0)      # any horn indexing
         self.assertTrue(str(self.ask("cal jog 4 0.1")).startswith("usage"))
-        time.sleep(1.2)
-        self.assertEqual(self.dev.phase, "SETTLE")                          # held while aligning
+        time.sleep(1.5)
+        self.assertEqual(self.dev.phase, "ALIGN")                           # no timeout, never READY
         c = self.ask("cal save")
-        self.assertEqual((c["state"], c["stored"], c["seq"], c["zero"][0]), ("IDLE", "OK", 1, 0.1))
+        self.assertEqual((c["state"], c["stored"], c["seq"], c["zero"][2], c["auth"]), ("IDLE", "OK", 1, -45.0, "full"))
+        self.assertEqual(self.dev.phase, "SETTLE")
         time.sleep(1.5)
         self.assertEqual(self.dev.phase, "READY")
 
-    def test_cancel_reverts_and_ready_refuses_begin(self):
+    def test_from_ready_cancel_reverts_and_clipped_holds(self):
         self.board(cal=[0.2, 0.0, 0.0, 0.0])
         time.sleep(1.0)
         self.assertEqual(self.dev.phase, "READY")
-        self.assertEqual(self.ask("cal begin")["state"], "IDLE")            # not on the pad: refused
-        with self.dev.lock:
-            self.dev.phase = "SETTLE"
-        self.ask("cal begin")
+        self.ask("cal begin")                                               # allowed from READY
+        self.assertEqual(self.dev.phase, "ALIGN")
         self.ask("cal jog 0 -0.5")
         c = self.ask("cal cancel")
-        self.assertEqual((c["state"], c["zero"][0]), ("IDLE", 0.2))
+        self.assertEqual((c["state"], c["zero"][0], self.dev.phase), ("IDLE", 0.2, "SETTLE"))
+        time.sleep(1.5)
+        self.assertEqual(self.dev.phase, "READY")
+        self.ask("cal begin")
+        self.ask("cal set 1 75")
+        c = self.ask("cal save")
+        self.assertEqual((c["auth"], c["ready"]), ("clipped", "held"))
+        time.sleep(1.5)
+        self.assertEqual(self.dev.phase, "SETTLE")                          # held: authority clipped
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

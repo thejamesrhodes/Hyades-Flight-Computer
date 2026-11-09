@@ -4,7 +4,7 @@
 static PhaseWord W;
 static const Phase k_all[PHASE_COUNT] = {
     PH_BOOT, PH_CALIBRATE, PH_SETTLING, PH_READY, PH_BOOST,
-    PH_COAST, PH_DESCENT, PH_LANDED, PH_LOCKOUT, PH_CATO_SAFE
+    PH_COAST, PH_DESCENT, PH_LANDED, PH_LOCKOUT, PH_CATO_SAFE, PH_ALIGN
 };
 
 void setUp(void) { Phase_Init(&W); }
@@ -113,6 +113,35 @@ static void test_recover_only_from_lockout(void)
     TEST_ASSERT_EQUAL_HEX16(PH_SETTLING, now());
 }
 
+
+/* CAL-01: ALIGN is entered from SETTLING or READY only; it is left only to
+ * SETTLING (save/cancel), BOOST (liftoff, F3) or LOCKOUT (HARD); never READY,
+ * and it never actuates and is never "in flight". */
+static void test_align_phase_edges(void)
+{
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_ALIGN));     /* not from BOOT */
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_CALIBRATE));
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_ALIGN));     /* not from CALIBRATE */
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_SETTLING));
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_ALIGN));
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_READY));     /* never straight to READY */
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_CALIBRATE));
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_CATO_SAFE));
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_SETTLING));   /* save / cancel */
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_READY));
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_ALIGN));      /* from READY too */
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_BOOST));      /* liftoff while aligning is sequenced */
+    TEST_ASSERT_FALSE(Phase_Transition(&W, PH_ALIGN));     /* never in flight */
+    Phase_Init(&W);
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_CALIBRATE));
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_SETTLING));
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_ALIGN));
+    TEST_ASSERT_TRUE(Phase_Transition(&W, PH_LOCKOUT));    /* HARD on the pad */
+    TEST_ASSERT_FALSE(Phase_InFlight(PH_ALIGN));
+    TEST_ASSERT_FALSE(Phase_ActuationAllowed(PH_ALIGN, true));
+    TEST_ASSERT_EQUAL_STRING("ALIGN", Phase_Name(PH_ALIGN));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -125,5 +154,6 @@ int main(void)
     RUN_TEST(test_consistent_but_invalid_code_rejected);
     RUN_TEST(test_actuation_policy);
     RUN_TEST(test_recover_only_from_lockout);
+    RUN_TEST(test_align_phase_edges);
     return UNITY_END();
 }

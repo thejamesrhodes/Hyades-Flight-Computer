@@ -57,7 +57,7 @@ void CalStore_Init(CalStore *c)
 
 bool CalStore_Full(const CalStore *c) { return c->s.next >= c->s.slots; }
 
-static bool append(CalStore *c, uint16_t seq, const int16_t off_mdeg[FINCAL_FINS])
+static bool append(CalStore *c, uint16_t seq, const int32_t off_mdeg[FINCAL_FINS])
 {
     if (!FinCal_InRange(off_mdeg) || CalStore_Full(c)) { return false; }
     uint8_t rec[FINCAL_REC_SIZE];
@@ -75,7 +75,7 @@ static bool append(CalStore *c, uint16_t seq, const int16_t off_mdeg[FINCAL_FINS
     return false;
 }
 
-bool CalStore_Save(CalStore *c, const int16_t off_mdeg[FINCAL_FINS])
+bool CalStore_Save(CalStore *c, const int32_t off_mdeg[FINCAL_FINS])
 {
     const uint16_t seq = c->s.cal.valid ? (uint16_t)(c->s.cal.seq + 1u) : 1u;
     return append(c, seq, off_mdeg);

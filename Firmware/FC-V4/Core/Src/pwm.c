@@ -40,6 +40,9 @@ _Static_assert((PWM_TICK_HZ % 1000000u) == 0u, "PWM tick must be a whole number 
 _Static_assert(PWM_ARR <= 65535u, "TIM3 is 16-bit: servo period too long for this tick");
 #define SERVO_RANGE_DEG_INT   ((int32_t)SERVO_RANGE_DEG)   /* 180: a whole number of degrees */
 _Static_assert(FIN_COUNT == FINCAL_FINS, "one calibrated zero per fin");
+_Static_assert(PWM_TICKS_PER_US <= 16u, "zero conversion overflows int32 above 16 ticks/us");
+_Static_assert(FIN_ZERO_FULL_AUTH_MDEG == ((((int32_t)SERVO_RANGE_DEG / 2) - (int32_t)FIN_DEFLECT_DEG) * 1000),
+               "full-authority zero limit = half the servo range minus the command authority");
 
 /* Per-fin mechanical zero in ticks (CAL-01). Integer, so PWM_CentreFins stays
  * safe to call from fault handlers. Written only through PWM_SetZeroMdeg. */
@@ -105,8 +108,11 @@ void PWM_SetFin(uint8_t fin_idx, float norm)
 }
 
 /* Millidegrees at the servo -> ticks, rounded: mdeg x 1200 us / 180 deg x
- * ticks/us / 1000. |mdeg| <= 10000 keeps every product inside int32. */
-void PWM_SetZeroMdeg(const int16_t mdeg[FIN_COUNT])
+ * ticks/us / 1000. |mdeg| <= 90 000 and <= 16 ticks/us keep every product
+ * inside int32 (90 000 x 1200 x 16 = 1.7e9). A zero near +/-90 deg leaves the
+ * pulse at the end-stop clamp on that side: the app holds READY beyond
+ * FIN_ZERO_FULL_AUTH_MDEG for that reason. */
+void PWM_SetZeroMdeg(const int32_t mdeg[FIN_COUNT])
 {
     const int32_t den = (SERVO_RANGE_DEG_INT * 1000);
     for (uint32_t i = 0u; i < FIN_COUNT; i++) {

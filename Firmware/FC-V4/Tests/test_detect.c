@@ -54,6 +54,8 @@ static void test_no_liftoff_outside_ready(void)
     DetectIn boost = { .f_axial = 10.0f * G };
     TEST_ASSERT_EQUAL_HEX16(PH_BOOST, run(PH_SETTLING, boost, 100u));
     setUp();
+    TEST_ASSERT_EQUAL_HEX16(PH_BOOST, run(PH_ALIGN, boost, 100u));       /* CAL-01: aligning on the pad */
+    setUp();
     TEST_ASSERT_EQUAL_HEX16(PH_LOCKOUT, run(PH_LOCKOUT, boost, 100u));
 }
 

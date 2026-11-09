@@ -140,7 +140,16 @@ static void cal_apply(void) { PWM_SetZeroMdeg(Align_Zero(&A.al, A.cal.s.cal.off_
 
 static bool hard_fault_now(void) { return Fdir_Worst(&A.F.fdir, false) >= SEV_HARD; }
 
-static bool cal_ready_ok(void) { return A.cal.s.cal.valid || (CFG_REQUIRE_FIN_CAL == 0); }
+/* A zero beyond FIN_ZERO_FULL_AUTH_MDEG would let the servo end-stop clip the
+ * command authority on one side: valid but not flyable. */
+static bool cal_full_auth(void) { return FinCal_Within(A.cal.s.cal.off_mdeg, FIN_ZERO_FULL_AUTH_MDEG); }
+static bool cal_ready_ok(void)
+{
+    return (A.cal.s.cal.valid && cal_full_auth()) || (CFG_REQUIRE_FIN_CAL == 0);
+}
+
+/* Millidegrees -> int16 centidegrees for the log event (|zero| <= 90 deg). */
+static uint16_t cdeg16(int32_t mdeg) { return (uint16_t)(int16_t)((mdeg >= 0) ? ((mdeg + 5) / 10) : ((mdeg - 5) / 10)); }
 
 /* Millidegrees as a signed decimal with three places (no float printf). */
 static const char *fmt_mdeg(char out[CON_FX_LEN], int32_t m)
@@ -207,7 +216,7 @@ static void event(EventCode code, uint32_t arg0, const char *text)
 }
 
 /* The calibration in force goes into every flight log, at arming: arg0/arg1
- * carry the four zeros as int16 millidegree pairs (fins 0|1, 2|3). */
+ * carry the four zeros as int16 centidegree pairs (fins 0|1, 2|3). */
 static void log_cal(void)
 {
     if (A.logm == LOGM_OFF) { return; }
@@ -216,8 +225,8 @@ static void log_cal(void)
     memset(&e, 0, sizeof e);
     e.t_us = Sched_MicrosNow(); e.seq = FlashLog_NextSeq();
     e.code = (uint8_t)EV_CAL; e.phase = Phase_Index(phase_now());
-    e.arg0 = (uint32_t)(uint16_t)c->off_mdeg[0] | ((uint32_t)(uint16_t)c->off_mdeg[1] << 16);
-    e.arg1 = (uint32_t)(uint16_t)c->off_mdeg[2] | ((uint32_t)(uint16_t)c->off_mdeg[3] << 16);
+    e.arg0 = (uint32_t)cdeg16(c->off_mdeg[0]) | ((uint32_t)cdeg16(c->off_mdeg[1]) << 16);
+    e.arg1 = (uint32_t)cdeg16(c->off_mdeg[2]) | ((uint32_t)cdeg16(c->off_mdeg[3]) << 16);
     char t[sizeof e.text + 1u];
     (void)snprintf(t, sizeof t, "fin zero %s seq %u", c->valid ? "cal" : "NONE", (unsigned)c->seq);
     copy_text(e.text, sizeof e.text, t);
@@ -247,7 +256,7 @@ static void log_on_phase(Phase to)
         }
     } else if (to == PH_LANDED) {
         A.log_landed = true; A.log_landed_ms = HAL_GetTick();
-    } else if ((A.logm == LOGM_ARMED) && ((to == PH_SETTLING) || (to == PH_LOCKOUT))) {
+    } else if ((A.logm == LOGM_ARMED) && ((to == PH_SETTLING) || (to == PH_LOCKOUT) || (to == PH_ALIGN))) {
         A.logm = LOGM_OFF;                        /* pad demotion: the ring is discarded */
         LogQ_Reset(&A.lq);
     } else {
@@ -340,17 +349,18 @@ static void task_flight(void)
 #if defined(CFG_FLIGHT_BUILD) && (CFG_FLIGHT_BUILD != 0)
     in.ready_inhibit = (LOG_AUTOSTART != 0) && !A.log_space_ok;   /* no flight without a log */
 #endif
-    /* Alignment session (CAL-01): ends and reverts on phase, fault, link loss
-     * or idle; while it runs, and with no stored calibration, READY is held. */
-    const AlignEnd ae = Align_Poll(&A.al, phase_now(), hard_fault_now(), UsbIo_Connected(), in.now_ms);
+    /* CAL-01: no READY without a stored, full-authority canard calibration. */
+    in.ready_inhibit = in.ready_inhibit || !cal_ready_ok();
+    Flight_Step(&A.F, &in, A.dt);
+    /* An alignment session lives in the ALIGN phase. If this frame left it (HARD
+     * fault, liftoff), restore the stored zero before the servos are commanded. */
+    const AlignEnd ae = Align_Poll(&A.al, phase_now());
     if (ae != AL_END_NONE) {
         cal_apply();
         char t[48];
         (void)snprintf(t, sizeof t, "fin align ended: %s (reverted)", Align_EndText(ae));
         event(EV_CAL, (uint32_t)ae, t);
     }
-    in.ready_inhibit = in.ready_inhibit || Align_Active(&A.al) || !cal_ready_ok();
-    Flight_Step(&A.F, &in, A.dt);
     A.skip_overrun = false;
     for (uint8_t i = 0u; i < FIN_COUNT; i++) { PWM_SetFin(i, A.F.fin[i]); }
     PWM_Commit();
@@ -479,7 +489,7 @@ static void send_text(void)
                (unsigned long)((FlashLog_UsedBytes() * 100u) / FlashLog_CapacityBytes()),
                Con_Fx(b[12], Nav_Height(&A.F.nav), 1u), Con_Fx(b[13], Nav_VUp(&A.F.nav), 1u),
                Con_Fx(b[14], A.F.nav.qbar, 0u),
-               Align_Active(&A.al) ? "ALIGN" : (A.cal.s.cal.valid ? "OK" : "NONE"));
+               Align_Active(&A.al) ? "ALIGN" : (!A.cal.s.cal.valid ? "NONE" : (cal_full_auth() ? "OK" : "CLIPPED")));
 }
 #endif
 
@@ -746,21 +756,21 @@ static void cmd_log(uint32_t argc, char *argv[])
 /* Canard zero alignment (CAL-01). Every reply ends with one machine-readable
  * "CAL ..." line that the ground station parses:
  *   CAL state=ALIGN|IDLE stored=OK|NONE seq=<n> zero=<f0>,<f1>,<f2>,<f3>
- *       trial=<...> journal=<used>/<slots> idle_s=<s> ready=ok|held
+ *       trial=<...> journal=<used>/<slots> auth=full|clipped ready=ok|held
  * Angles in degrees at the servo, three decimals. */
 static void cal_report(void)
 {
     const FinCal *c = &A.cal.s.cal;
-    const int16_t *z = c->off_mdeg;
-    const int16_t *t = Align_Zero(&A.al, z);
+    const int32_t *z = c->off_mdeg;
+    const int32_t *t = Align_Zero(&A.al, z);
     char b[8][CON_FX_LEN];
-    Con_Printf("CAL state=%s stored=%s seq=%u zero=%s,%s,%s,%s trial=%s,%s,%s,%s journal=%lu/%lu idle_s=%lu ready=%s\r\n",
+    Con_Printf("CAL state=%s stored=%s seq=%u zero=%s,%s,%s,%s trial=%s,%s,%s,%s journal=%lu/%lu auth=%s ready=%s\r\n",
                Align_Active(&A.al) ? "ALIGN" : "IDLE", c->valid ? "OK" : "NONE", (unsigned)c->seq,
                fmt_mdeg(b[0], z[0]), fmt_mdeg(b[1], z[1]), fmt_mdeg(b[2], z[2]), fmt_mdeg(b[3], z[3]),
                fmt_mdeg(b[4], t[0]), fmt_mdeg(b[5], t[1]), fmt_mdeg(b[6], t[2]), fmt_mdeg(b[7], t[3]),
                (unsigned long)A.cal.s.next, (unsigned long)A.cal.s.slots,
-               (unsigned long)(Align_IdleLeftMs(&A.al, HAL_GetTick()) / 1000u),
-               (Align_Active(&A.al) || !cal_ready_ok()) ? "held" : "ok");
+               (FinCal_Within(t, FIN_ZERO_FULL_AUTH_MDEG)) ? "full" : "clipped",
+               ((phase_now() == PH_ALIGN) || !cal_ready_ok()) ? "held" : "ok");
 }
 
 static bool cal_fin_arg(const char *s, uint32_t *fin)
@@ -773,11 +783,14 @@ static bool cal_fin_arg(const char *s, uint32_t *fin)
 static void cmd_cal(uint32_t argc, char *argv[])
 {
     const char *sub = (argc >= 2u) ? argv[1] : "show";
-    const uint32_t now = HAL_GetTick();
     AlignResult r = AL_OK;
     if (strcmp(sub, "begin") == 0) {
-        r = Align_Begin(&A.al, A.cal.s.cal.off_mdeg, phase_now(), hard_fault_now(), now);
-        if (r == AL_OK) { cal_apply(); event(EV_CAL, 0u, "fin align session started"); }
+        r = Align_Begin(&A.al, A.cal.s.cal.off_mdeg, phase_now(), hard_fault_now());
+        if (r == AL_OK) {
+            go_phase(PH_ALIGN);                       /* SETTLING/READY -> ALIGN (phase.c) */
+            if (phase_now() != PH_ALIGN) { (void)Align_End(&A.al, AL_END_CANCEL); r = AL_ERR_PHASE; }
+            else { cal_apply(); event(EV_CAL, 0u, "fin align session started"); }
+        }
     } else if ((strcmp(sub, "jog") == 0) || (strcmp(sub, "set") == 0)) {
         uint32_t fin = 0u;
         int32_t mdeg = 0;
@@ -785,7 +798,7 @@ static void cmd_cal(uint32_t argc, char *argv[])
             Con_Printf("usage: cal %s <fin 0-3> <deg, e.g. -0.10>\r\n", sub);
             return;
         }
-        r = (sub[0] == 'j') ? Align_Jog(&A.al, fin, mdeg, now) : Align_Set(&A.al, fin, mdeg, now);
+        r = (sub[0] == 'j') ? Align_Jog(&A.al, fin, mdeg) : Align_Set(&A.al, fin, mdeg);
         if (r == AL_OK) { cal_apply(); }
     } else if (strcmp(sub, "save") == 0) {
         if (!Align_Active(&A.al)) { r = AL_ERR_IDLE; }
@@ -801,13 +814,19 @@ static void cmd_cal(uint32_t argc, char *argv[])
         } else {
             (void)Align_End(&A.al, AL_END_SAVED);
             cal_apply();
+            go_phase(PH_SETTLING);                    /* READY needs the full hold again */
             char t[40];
             (void)snprintf(t, sizeof t, "fin zero cal saved seq %u", (unsigned)A.cal.s.cal.seq);
             event(EV_CAL, A.cal.s.cal.seq, t);
         }
     } else if (strcmp(sub, "cancel") == 0) {
         if (!Align_Active(&A.al)) { r = AL_ERR_IDLE; }
-        else { (void)Align_End(&A.al, AL_END_CANCEL); cal_apply(); event(EV_CAL, 0u, "fin align cancelled (reverted)"); }
+        else {
+            (void)Align_End(&A.al, AL_END_CANCEL);
+            cal_apply();
+            event(EV_CAL, 0u, "fin align cancelled (reverted)");
+            go_phase(PH_SETTLING);
+        }
     } else if (strcmp(sub, "show") != 0) {
         Con_Printf("usage: cal [show|begin|jog <fin> <deg>|set <fin> <deg>|save|cancel]\r\n");
         return;
@@ -874,7 +893,7 @@ static const ConCmd k_cmds[] = {
     { "gps",    "[raw|probe]              GNSS detail, last NMEA, wiring probe", cmd_gps    },
     { "imu",    "[capture]                IMU diagnostics; raw noise capture (ends by reboot)", cmd_imu },
     { "log",    "[info|start|stop|erase|pull]  flight log (internal flash)",   cmd_log    },
-    { "cal",    "[begin|jog f d|set f d|save|cancel]  canard zero alignment (pad)", cmd_cal },
+    { "cal",    "[begin|jog f d|set f d|save|cancel]  canard zero alignment (ALIGN phase)", cmd_cal },
     { "fw",     "<size> <crc32hex>        USB firmware update (fc_flash.py)",  cmd_fw     },
     { "reboot", "                         reset (not in flight)",              cmd_reboot },
 #if CFG_FAULT_INJECTION
@@ -979,10 +998,14 @@ static void boot(UART_HandleTypeDef *huart)
                (unsigned long)FlashLog_UsedBytes(), (unsigned long)FlashLog_CapacityBytes());
     if (A.cal.s.cal.valid) {
         char b[4][CON_FX_LEN];
-        const int16_t *z = A.cal.s.cal.off_mdeg;
+        const int32_t *z = A.cal.s.cal.off_mdeg;
         Con_Printf("[BOOT] fin zero cal seq %u: %s %s %s %s deg (journal %lu/%lu)\r\n", (unsigned)A.cal.s.cal.seq,
                    fmt_mdeg(b[0], z[0]), fmt_mdeg(b[1], z[1]), fmt_mdeg(b[2], z[2]), fmt_mdeg(b[3], z[3]),
                    (unsigned long)A.cal.s.next, (unsigned long)A.cal.s.slots);
+        if (!cal_full_auth()) {
+            Con_Printf("[BOOT] fin zero beyond +/-%lu deg: the servo end stop would clip the authority, READY is held\r\n",
+                       (unsigned long)(FIN_ZERO_FULL_AUTH_MDEG / 1000));
+        }
     } else {
         Con_Printf("[BOOT] fin zero cal: NONE%s - align the canards ('cal begin')\r\n",
                    (CFG_REQUIRE_FIN_CAL != 0) ? ", READY is held" : "");

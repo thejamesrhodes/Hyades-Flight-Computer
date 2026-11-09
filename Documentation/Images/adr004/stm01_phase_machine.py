@@ -35,6 +35,7 @@ S = {
     "COAST": (5, Y_MAIN, "fly",   "COAST",     "Roll control active",   "Log at 100 Hz"),
     "DESC":  (6, Y_MAIN, "fly",   "DESCENT",   "Fins off",              "Log at 20 Hz"),
     "LAND":  (7, Y_MAIN, "end",   "LANDED",    "Terminal state",        "Log closes after 60 s"),
+    "ALIGN": (2.5, 3.3, "pad",    "ALIGN",     "Fins hold trial zero",  "HARD fault: LOCKOUT"),
     "LOCK":  (2, Y_FAULT, "fault", "LOCKOUT",  "Pad fault, latched",    "Fins off"),
     "CATO":  (5, Y_FAULT, "fault", "CATO_SAFE", "Flight fault, latched", "Fins off"),
 }
@@ -69,9 +70,9 @@ def tag(ax, x, y, s, color=BLK, ha="center", va="center", fs=8.4):
             bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none"))
 
 
-fig = plt.figure(figsize=(22, 6.55))
+fig = plt.figure(figsize=(22, 8.4))
 ax = fig.add_axes([0.01, 0.0, 0.98, 0.93])
-ax.set_xlim(-1.9, 7 * PX + 1.9); ax.set_ylim(-6.45, 3.35)
+ax.set_xlim(-1.9, 7 * PX + 1.9); ax.set_ylim(-6.45, 6.1)
 ax.set_aspect("equal"); ax.axis("off")
 for n in S:
     box(ax, n)
@@ -86,12 +87,20 @@ for a, b, s in main:
     path(ax, [(X(a) + hw, 0.0), (X(b) - hw, 0.0)], lw=2.8 if a == "READY" else 1.5)
     tag(ax, (X(a) + X(b)) / 2, 0.0, s)
 
-# demotion (T8) and launch from SETTLING (T9)
-yA, yB = 1.3, 2.1
+# demotion (T8), canard alignment (T17, T18) and launch from SETTLING or ALIGN (T9)
+yA, yB, yS = 1.3, 5.0, 4.35
+XA, ya = X("ALIGN"), S["ALIGN"][1]
 path(ax, [(X("READY") - 0.55, hh), (X("READY") - 0.55, yA), (X("SET") + 0.55, yA), (X("SET") + 0.55, hh)], REC)
 tag(ax, (X("SET") + X("READY")) / 2, yA, "T8  SOFT fault", REC)
-path(ax, [(X("SET") - 0.55, hh), (X("SET") - 0.55, yB), (X("BOOST"), yB), (X("BOOST"), hh)], REC)
-tag(ax, (X("SET") + X("READY")) / 2, yB, "T9  Liftoff before READY", REC)
+for xv, xe in ((X("SET") + 0.25, XA - hw), (X("READY") - 0.25, XA + hw)):
+    path(ax, [(xv, hh), (xv, ya), (xe, ya)])
+    tag(ax, xv, 1.95, "T17\ncal begin")
+path(ax, [(XA - 0.3, ya + hh), (XA - 0.3, yS), (X("SET") - 0.4, yS), (X("SET") - 0.4, hh)])
+tag(ax, (XA - 0.3 + X("SET") - 0.4) / 2, yS, "T18  Save or cancel")
+path(ax, [(X("SET") - 1.0, hh), (X("SET") - 1.0, yB), (X("BOOST"), yB), (X("BOOST"), hh)], REC)
+path(ax, [(XA + 0.6, ya + hh), (XA + 0.6, yB)], REC, head=False)
+ax.plot([XA + 0.6], [yB], "o", color=REC, ms=4.5, zorder=4)
+tag(ax, (X("SET") - 1.0 + XA + 0.6) / 2, yB, "T9  Liftoff before READY", REC)
 
 # pad faults into LOCKOUT
 yBus = -1.95
@@ -125,11 +134,11 @@ for n in ("LOCK", "CATO"):
 
 # liftoff divider: HARD fault outcomes differ either side
 XD = 0.5 * (X("READY") + X("BOOST"))
-ax.plot([XD, XD], [-5.95, 2.75], color="#7a7a7a", lw=2.0, zorder=1, solid_capstyle="butt")
-ax.text(XD - 0.3, 3.05, "Before liftoff", ha="right", va="center", fontsize=10, weight="bold")
-ax.text(XD - 0.3, 2.68, "Hold safe on pad", ha="right", va="center", fontsize=8.6)
-ax.text(XD + 0.3, 3.05, "After liftoff", ha="left", va="center", fontsize=10, weight="bold")
-ax.text(XD + 0.3, 2.68, "Fins off, recovery continues", ha="left", va="center", fontsize=8.6)
+ax.plot([XD, XD], [-5.95, 5.45], color="#7a7a7a", lw=2.0, zorder=1, solid_capstyle="butt")
+ax.text(XD - 0.3, 5.8, "Before liftoff", ha="right", va="center", fontsize=10, weight="bold")
+ax.text(XD - 0.3, 5.43, "Hold safe on pad", ha="right", va="center", fontsize=8.6)
+ax.text(XD + 0.3, 5.8, "After liftoff", ha="left", va="center", fontsize=10, weight="bold")
+ax.text(XD + 0.3, 5.43, "Fins off, recovery continues", ha="left", va="center", fontsize=8.6)
 
 # key, stacked, bottom left
 KX, KY, KDY = -hw, -2.3, 0.42

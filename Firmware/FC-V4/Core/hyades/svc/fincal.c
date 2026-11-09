@@ -20,22 +20,24 @@ static uint32_t get_u32(const uint8_t *p)
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-bool FinCal_InRange(const int16_t off_mdeg[FINCAL_FINS])
+bool FinCal_Within(const int32_t off_mdeg[FINCAL_FINS], int32_t lim_mdeg)
 {
     for (uint32_t i = 0u; i < FINCAL_FINS; i++) {
-        if ((off_mdeg[i] > FINCAL_LIMIT_MDEG) || (off_mdeg[i] < -FINCAL_LIMIT_MDEG)) { return false; }
+        if ((off_mdeg[i] > lim_mdeg) || (off_mdeg[i] < -lim_mdeg)) { return false; }
     }
     return true;
 }
 
-void FinCal_Pack(uint8_t out[FINCAL_REC_SIZE], uint16_t seq, const int16_t off_mdeg[FINCAL_FINS])
+bool FinCal_InRange(const int32_t off_mdeg[FINCAL_FINS]) { return FinCal_Within(off_mdeg, FINCAL_LIMIT_MDEG); }
+
+void FinCal_Pack(uint8_t out[FINCAL_REC_SIZE], uint16_t seq, const int32_t off_mdeg[FINCAL_FINS])
 {
     memset(out, 0, FINCAL_REC_SIZE);
     put_u32(&out[OFF_MAGIC], FINCAL_MAGIC);
     put_u16(&out[OFF_SEQ], seq);
     out[OFF_VER] = (uint8_t)FINCAL_VERSION;
     out[OFF_COUNT] = (uint8_t)FINCAL_FINS;
-    for (uint32_t i = 0u; i < FINCAL_FINS; i++) { put_u16(&out[OFF_FINS + (2u * i)], (uint16_t)off_mdeg[i]); }
+    for (uint32_t i = 0u; i < FINCAL_FINS; i++) { put_u32(&out[OFF_FINS + (4u * i)], (uint32_t)off_mdeg[i]); }
     put_u32(&out[OFF_CRC], crc32_ieee(out, OFF_CRC));
 }
 
@@ -45,8 +47,8 @@ bool FinCal_Unpack(const uint8_t in[FINCAL_REC_SIZE], FinCal *out)
     if (get_u32(&in[OFF_MAGIC]) != FINCAL_MAGIC) { return false; }
     if ((in[OFF_VER] != (uint8_t)FINCAL_VERSION) || (in[OFF_COUNT] != (uint8_t)FINCAL_FINS)) { return false; }
     if (get_u32(&in[OFF_CRC]) != crc32_ieee(in, OFF_CRC)) { return false; }
-    int16_t off[FINCAL_FINS];
-    for (uint32_t i = 0u; i < FINCAL_FINS; i++) { off[i] = (int16_t)get_u16(&in[OFF_FINS + (2u * i)]); }
+    int32_t off[FINCAL_FINS];
+    for (uint32_t i = 0u; i < FINCAL_FINS; i++) { off[i] = (int32_t)get_u32(&in[OFF_FINS + (4u * i)]); }
     if (!FinCal_InRange(off)) { return false; }
     out->seq = get_u16(&in[OFF_SEQ]);
     for (uint32_t i = 0u; i < FINCAL_FINS; i++) { out->off_mdeg[i] = off[i]; }

@@ -692,8 +692,8 @@ class App:
         self.dim_labels.append(self.dash_note)
 
     # ------------------------------------------------------- canard alignment
-    CAL_STEPS = (-1.0, -0.1, -0.02, +0.02, +0.1, +1.0)
-    CAL_PAD = ("BOOT", "CAL", "SETTLE")
+    CAL_STEPS = (-10.0, -1.0, -0.1, -0.02, +0.02, +0.1, +1.0, +10.0)
+    CAL_BEGIN = ("SETTLE", "READY")
 
     def _canards(self, p) -> None:
         """CAL-01: jog each canard onto its jig or laser line, then save the zeros."""
@@ -704,9 +704,10 @@ class App:
         body.pack(fill="both", expand=True, padx=10, pady=10)
         self.frames_.append(body)
         intro = tk.Label(body, anchor="w", justify="left", font=self.f_ui, wraplength=940, text=(
-            "On the pad before READY (phase SETTLE): Begin, nudge each canard until it sits on its jig or laser "
-            "line, then Save. While a session runs the canards hold the trial zero and READY is held. Cancel, a "
-            "phase change, a HARD fault, losing USB or 60 s without a command restores the stored zero."))
+            "On the pad (SETTLE or READY): Begin puts the flight computer in the ALIGN phase, where the canards "
+            "hold the trial zero and nothing actuates. Nudge each canard onto its jig or laser line, then Save. "
+            "ALIGN is left only by Save or Cancel (both return to SETTLE, so READY needs its full hold again), "
+            "a HARD fault (LOCKOUT) or a liftoff. Anything but Save restores the stored zero."))
         intro.pack(fill="x")
         self.dim_labels.append(intro)
 
@@ -716,9 +717,9 @@ class App:
         self.t_cal_sess = Tile(self, tiles, "Session", 8)
         self.t_cal_store = Tile(self, tiles, "Stored calibration", 12)
         self.t_cal_journal = Tile(self, tiles, "Journal (saves)", 8)
-        self.t_cal_idle = Tile(self, tiles, "Auto-revert in", 6)
+        self.t_cal_auth = Tile(self, tiles, "Command authority", 8)
         self.t_cal_ready = Tile(self, tiles, "READY gate", 8)
-        for i, t in enumerate((self.t_cal_sess, self.t_cal_store, self.t_cal_journal, self.t_cal_idle,
+        for i, t in enumerate((self.t_cal_sess, self.t_cal_store, self.t_cal_journal, self.t_cal_auth,
                                self.t_cal_ready)):
             t.grid(row=0, column=i, sticky="nsew", padx=(0, 6))
             tiles.columnconfigure(i, weight=1, uniform="cal")
@@ -756,7 +757,7 @@ class App:
             self.panels_.append(jf)
             for st in self.CAL_STEPS:
                 b = self._button(jf, f"{st:+g}", lambda i=i, st=st: self.send(f"cal jog {i} {st:+.2f}"))
-                b.configure(anchor="center", width=5, padx=2)
+                b.configure(anchor="center", width=4, padx=2)
                 b.pack(side="left", padx=(0, 3))
                 self.cal_jog_btns.append(b)
             sf = tk.Frame(grid, highlightthickness=0)
@@ -771,16 +772,17 @@ class App:
             self.cal_jog_btns.append(b)
             self.cal_rows.append(row)
         note = tk.Label(body, anchor="w", justify="left", font=self.f_ui, wraplength=940, text=(
-            "Angles are at the servo. 0.02 deg is about one PWM tick (0.019 deg). Limits: 2 deg per jog, "
-            "10 deg in total (more than that means the linkage or horn is wrong, not the zero). Every save is "
-            "appended to a flash journal, recorded in the next flight log and kept through firmware updates."))
+            "Angles are at the servo. 0.02 deg is about one PWM tick (0.019 deg). A zero can be anything within "
+            "+/-90 deg, so any horn indexing can be taken out; one jog is at most 10 deg (use Set for more). Beyond "
+            "+/-60 deg the servo end stop would clip the +/-30 deg command authority, so READY is held. Every save "
+            "is appended to a flash journal, recorded in the next flight log and kept through firmware updates."))
         note.pack(fill="x", pady=(8, 0))
         self.dim_labels.append(note)
 
     def cal_set(self, i: int, e: tk.Entry) -> None:
         txt = e.get().strip()
-        if not re.fullmatch(r"[+-]?(\d{1,2}(\.\d{0,3})?|\.\d{1,3})", txt):
-            self.note(f"canard {i}: '{txt}' is not an angle in degrees (up to 3 decimals, e.g. -0.125)", "err")
+        if not re.fullmatch(r"[+-]?(\d{1,2}(\.\d{0,3})?|\.\d{1,3})", txt) or abs(float(txt)) > 90.0:
+            self.note(f"canard {i}: '{txt}' is not an angle within +/-90 deg (up to 3 decimals, e.g. -0.125)", "err")
             return
         if self.send(f"cal set {i} {txt}"):
             e.delete(0, "end")
@@ -790,15 +792,17 @@ class App:
         if not c or c["state"] != "ALIGN":
             return
         rows = "\n".join(f"  {n:<9} {z:+.3f}  ->  {t:+.3f} deg" for n, z, t in zip(link.FIN_NAMES, c["zero"], c["trial"]))
+        warn = "" if c["auth"] == "full" else ("\n\nA zero beyond +/-60 deg clips the command authority: "
+                                               "READY will stay held until it is re-aligned.")
         if messagebox.askokcancel(APP, "Save these canard zeros to the flight computer?\n\n" + rows +
-                                  "\n\nThey apply to every flight until the next save.", icon="warning",
+                                  "\n\nThey apply to every flight until the next save. The board returns to "
+                                  "SETTLE and READY needs its full hold again." + warn, icon="warning",
                                   default="cancel"):
             self.send("cal save")
 
     def _cal_session_live(self) -> bool:
-        st = self.status
-        if st and self._age() < STALE_S and st.get("cal"):
-            return st["cal"] == "ALIGN"
+        if self.phase() is not None:
+            return self.phase() == "ALIGN"
         return bool(self.cal and self.cal["state"] == "ALIGN")
 
     def refresh_cal(self) -> None:
@@ -812,7 +816,7 @@ class App:
         if c and (c["state"] == "ALIGN") != live and ok and time.monotonic() - self.cal_query_t > 1.0:
             self.cal_query_t = time.monotonic()
             self.tx("cal")
-        pad = self.phase() in self.CAL_PAD
+        pad = self.phase() in self.CAL_BEGIN
         self.b_cal_begin.configure(state="normal" if ok and pad and not live else "disabled")
         for b in [self.b_cal_save, self.b_cal_cancel] + self.cal_jog_btns:
             b.configure(state="normal" if ok and live else "disabled")
@@ -820,20 +824,20 @@ class App:
             e.configure(state="normal" if ok and live else "disabled")
         self.b_cal_refresh.configure(state="normal" if ok else "disabled")
         if not c:
-            for t in (self.t_cal_sess, self.t_cal_store, self.t_cal_journal, self.t_cal_idle, self.t_cal_ready):
+            for t in (self.t_cal_sess, self.t_cal_store, self.t_cal_journal, self.t_cal_auth, self.t_cal_ready):
                 t.set("--", "idle")
             for row in self.cal_rows:
                 for k in ("stored", "trial", "delta"):
                     row[k].configure(text="--")
             return
-        self.t_cal_sess.set("ALIGNING" if live else "idle", "warn" if live else "idle")
+        self.t_cal_sess.set("ALIGN phase" if live else "idle", "warn" if live else "idle")
         self.t_cal_store.set(f"OK, seq {c['seq']}" if c["stored"] == "OK" else "NONE",
                              "ok" if c["stored"] == "OK" else "bad")
-        full = c["used"] >= c["slots"]
-        self.t_cal_journal.set(f"{c['used']}/{c['slots']}" + (" FULL" if full else ""), "bad" if full else "idle")
-        left = max(0, round(c["idle_s"] - (time.monotonic() - self.cal_t))) if live else None
-        self.t_cal_idle.set(f"{left} s" if left is not None else "--", "warn" if left is not None and left < 15 else "idle")
-        held = live or c["stored"] != "OK"
+        jfull = c["used"] >= c["slots"]
+        self.t_cal_journal.set(f"{c['used']}/{c['slots']}" + (" FULL" if jfull else ""), "bad" if jfull else "idle")
+        auth_ok = c["auth"] == "full"
+        self.t_cal_auth.set("full +/-30 deg" if auth_ok else "CLIPPED", "ok" if auth_ok else "bad")
+        held = c["ready"] != "ok"
         self.t_cal_ready.set("HELD" if held else "allowed", "warn" if held else "ok")
         for row, z, t in zip(self.cal_rows, c["zero"], c["trial"] if live else c["zero"]):
             row["stored"].configure(text=f"{z:+.3f}")

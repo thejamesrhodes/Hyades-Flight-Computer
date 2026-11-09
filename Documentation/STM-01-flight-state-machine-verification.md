@@ -1,6 +1,6 @@
 # STM-01: flight phase machine, written out and verified by hand
 
-**Date:** 8 November 2026. Revised 8 Nov: grid diagram with T-numbered transitions; three text corrections (§6).
+**Date:** 8 November 2026. Revised 8 Nov: grid diagram with T-numbered transitions; three text corrections (§6). Revised 9 Nov: ALIGN phase added for canard zero alignment (T17, T18; CAL-01), and the READY hold reset on every entry to SETTLING (F4).
 **Code:**
 - `Core/hyades/mission/phase.c` (allowed-transition table `k_allowed`, protected word);
 - `detect.c` (event detectors);
@@ -15,7 +15,7 @@
 
 1. Each phase's allowed exits were copied from `k_allowed`, and each guard from the code that requests the transition. The paths are `Detect_Step`, the worst-severity branch of the arbiter, the operator clear and the `app.c` boot sequence.
 2. For every (phase, event) pair: is the transition allowed, is it requested, and is the result what FDS-01 §3 intends?
-3. Every disagreement became a finding (F1–F3), with a code change and a test.
+3. Every disagreement became a finding (F1–F4), with a code change and a test.
 4. The same paths were then exercised by:
    - host tests (`test_phase`, `test_detect`, `test_flight`);
    - SITL: 7 680 flights (MC-01), then 3 840 more with corrected mass properties (LD-01). R1 (phase sequence) passed in 100 % of both sets;
@@ -29,20 +29,22 @@
 |---|---|---|---|---|
 | T1 | BOOT → CALIBRATE | IMU init and self-test pass | `app.c` boot | |
 | T2 | CALIBRATE → SETTLING | 1 s gyro-bias average, IEKF seeded, previous reset not by IWDG | `app.c` boot | |
-| T3 | SETTLING → READY | worst severity = INFO for `READY_HOLD_MS`, and `ready_inhibit` false: no canard alignment session running, a valid canard-zero calibration stored (CAL-01), and in the flight build ≥ 200 KB of erased log | arbiter | Log ring arms (if `LOG_AUTOSTART`, log space OK, no firmware update) |
+| T3 | SETTLING → READY | worst severity = INFO for `READY_HOLD_MS`, and `ready_inhibit` false: a valid canard-zero calibration stored with every zero within ±60° so the ±30° command authority is not clipped (CAL-01), and in the flight build ≥ 200 KB of erased log | arbiter | Log ring arms (if `LOG_AUTOSTART`, log space OK, no firmware update) |
 | T4 | READY → BOOST | f_ax > 3 g for 100 ms and nav v_up > 8 m/s, **or** f_ax > 3 g for 300 ms | `Detect_Step` | Log commits; drain starts |
 | T5 | BOOST → COAST | t_boost ≥ 0.1 s and f_ax < 0 for 50 ms | `Detect_Step` | |
 | T6 | COAST → DESCENT | nav valid and v_up < 0 for 50 ms, **or** t_coast ≥ `DET_T_APOGEE_MAX_S` (11.5 s; set per motor, MC-01 §4) | `Detect_Step` | Log drops to 20 Hz; fins OFF |
 | T7 | DESCENT → LANDED | t ≥ 15 s and (GPS quiet for 2 s, **or** shock > 3 g then still for 2 s, **or** still for 30 s), **or** t ≥ 300 s. Runs despite HARD. | `Detect_Step` | Log closes 60 s later |
 | T8 | READY → SETTLING | worst = SOFT and no liftoff pending (the detectors run first) | arbiter | Ring discarded; the full hold is needed again |
-| T9 | SETTLING → BOOST | the T4 rule | `Detect_Step` | **F3.** Log starts directly; control mode still capped by FDIR |
+| T9 | SETTLING, ALIGN → BOOST | the T4 rule | `Detect_Step` | **F3.** Log starts directly; control mode still capped by FDIR |
 | T10 | BOOT → LOCKOUT | IMU init or self-test fails | `app.c` | |
 | T11 | CALIBRATE → LOCKOUT | previous reset was the IWDG | `app.c` | FDS-01 §5.2 |
-| T12 | SETTLING, READY → LOCKOUT | any HARD on the pad | arbiter | Armed ring discarded |
+| T12 | SETTLING, READY, ALIGN → LOCKOUT | any HARD on the pad | arbiter | Armed ring discarded |
 | T13 | LOCKOUT → SETTLING | operator `faults clear`: on the pad, no HARD active, `Phase_Recover` | `serve_clear` | Full READY hold again |
 | T14 | BOOST, COAST → CATO_SAFE | any HARD in flight | arbiter | Fins OFF |
 | T15 | CATO_SAFE → LANDED | the T7 rules | `Detect_Step` | **F2** |
 | T16 | any → LOCKOUT or CATO_SAFE | phase word corrupt → `Phase_ForceSafe(in_flight)`, with in_flight taken from `det.last` | arbiter | **F1.** Bypasses `k_allowed` by design |
+| T17 | SETTLING, READY → ALIGN | operator `cal begin`: no HARD active (CAL-01) | `cmd_cal` | Armed ring discarded; fins hold the trial zero, no actuation |
+| T18 | ALIGN → SETTLING | operator `cal save` or `cal cancel` | `cmd_cal` | **F4.** Full READY hold again; cancel restores the stored zero |
 
 **Stillness**, as used in T7, means all three of the following over an EWMA with τ = 0.5 s:
 - sd(|f|) < 0.05 m/s² (5 mg);
@@ -51,7 +53,7 @@
 
 **GPS quiet** means |f| within 1 m/s² of g, |ω| < 0.2 rad/s, GPS-aided nav, and |v_up| < 1.5 m/s.
 
-**Terminal state:** LANDED only. LOCKOUT is left only by T13 on the pad. CATO_SAFE is left only by T15.
+**Terminal state:** LANDED only. LOCKOUT is left only by T13 on the pad. CATO_SAFE is left only by T15. ALIGN has no timeout and is left only by T18, T12 or T9; it never goes to READY directly.
 
 **Actuation:** BOOST and COAST only, plus READY on bench builds (`CFG_BENCH_ACTUATE_READY`; flight builds refuse to compile with it). The mode is FULL, RATE_DAMP or OFF from the FDIR capability ladder. `CFG_CTRL_SHADOW 1` runs and logs the law with the canards held at 0.
 
@@ -88,6 +90,14 @@ If ignition happened while the board was in SETTLING, the whole flight stayed in
 **Tests:** `test_liftoff_from_settling_is_sequenced`, plus updated `test_phase` and `test_detect`.
 
 **Not extended to LOCKOUT:** a board in LOCKOUT has impeached itself, so it neither actuates nor sequences.
+
+### F4: READY hold not reset on re-entry to SETTLING
+
+**Found** while adding ALIGN (9 Nov). The READY hold counter was not cleared on entry to SETTLING from ALIGN. A board that entered ALIGN from READY, then saved, went straight back to READY on the next frame without the hold.
+
+**Fix:** `Flight_GoPhase` clears `ready_hold` on every entry to SETTLING, so every entry (T8, T13, T18) needs the full `READY_HOLD_MS` again.
+
+**Test:** `test_align_holds_and_liftoff_sequenced` (fails without the fix).
 
 ## 4. Pairs checked and found correct
 

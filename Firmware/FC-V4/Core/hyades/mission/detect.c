@@ -39,7 +39,10 @@ static bool still_update(Detect *d, const DetectIn *in, float dt)
         && (fabsf(d->f_mean - G_STD) < c->land_acc_tol);
 }
 
-bool Detect_LiftoffPending(const Detect *d) { return ((d->last == PH_READY) || (d->last == PH_SETTLING)) && (d->n > 0u); }
+bool Detect_LiftoffPending(const Detect *d)
+{
+    return ((d->last == PH_READY) || (d->last == PH_SETTLING) || (d->last == PH_ALIGN)) && (d->n > 0u);
+}
 
 Phase Detect_Step(Detect *d, Phase now, const DetectIn *in, float dt)
 {
@@ -57,6 +60,7 @@ Phase Detect_Step(Detect *d, Phase now, const DetectIn *in, float dt)
     switch (now) {
     case PH_READY:
     case PH_SETTLING:      /* STM-01 F3: a launch that was not READY must still be sequenced */
+    case PH_ALIGN:
         if (persist(d, in->f_axial > c->liftoff_acc, c->liftoff_n_nov)
             || ((d->n >= c->liftoff_n) && in->v_valid && (in->v_up > c->liftoff_v))) {
             to = PH_BOOST;

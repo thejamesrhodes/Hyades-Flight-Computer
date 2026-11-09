@@ -107,7 +107,10 @@
 #define PWM_TICKS_PER_US      (PWM_TICK_HZ / 1000000u)
 /* The per-fin mechanical zero is not a build constant: it is measured with
  * the canard alignment session ('cal' commands, CAL-01), stored in the flash
- * journal (calstore.c) and applied by PWM_SetZeroMdeg in whole ticks. */
+ * journal (calstore.c) and applied by PWM_SetZeroMdeg in whole ticks. A zero
+ * may be up to +/-90 deg (any horn indexing); beyond +/-60 deg the servo end
+ * stop would clip the +/-FIN_DEFLECT_DEG authority, so READY is held. */
+#define FIN_ZERO_FULL_AUTH_MDEG  60000      /* 90 - FIN_DEFLECT_DEG, checked in pwm.c */
 
 /* ----------------------------------------------------------------------------
  * 5. CONTROLLER  —  geometric SO(3) outer loop + INDI inner loop

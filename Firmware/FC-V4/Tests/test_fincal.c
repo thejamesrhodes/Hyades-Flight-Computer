@@ -9,22 +9,24 @@ static uint8_t J[SLOTS * FINCAL_REC_SIZE];
 void setUp(void) { memset(J, 0xFF, sizeof J); }
 void tearDown(void) {}
 
-static void put(uint32_t slot, uint16_t seq, int16_t a, int16_t b, int16_t c, int16_t d)
+static void put(uint32_t slot, uint16_t seq, int32_t a, int32_t b, int32_t c, int32_t d)
 {
-    const int16_t off[4] = { a, b, c, d };
+    const int32_t off[4] = { a, b, c, d };
     FinCal_Pack(&J[slot * FINCAL_REC_SIZE], seq, off);
 }
 
 static void test_pack_unpack_round_trip(void)
 {
-    put(0, 7, 120, -40, 0, -10000);
+    put(0, 7, 120, -40, 0, -90000);
     FinCal c;
     TEST_ASSERT_TRUE(FinCal_Unpack(J, &c));
     TEST_ASSERT_TRUE(c.valid);
     TEST_ASSERT_EQUAL_UINT16(7, c.seq);
-    TEST_ASSERT_EQUAL_INT16(120, c.off_mdeg[0]);
-    TEST_ASSERT_EQUAL_INT16(-40, c.off_mdeg[1]);
-    TEST_ASSERT_EQUAL_INT16(-10000, c.off_mdeg[3]);
+    TEST_ASSERT_EQUAL_INT32(120, c.off_mdeg[0]);
+    TEST_ASSERT_EQUAL_INT32(-40, c.off_mdeg[1]);
+    TEST_ASSERT_EQUAL_INT32(-90000, c.off_mdeg[3]);
+    TEST_ASSERT_TRUE(FinCal_Within(c.off_mdeg, 90000));
+    TEST_ASSERT_FALSE(FinCal_Within(c.off_mdeg, 60000));     /* beyond the full-authority zero */
 }
 
 /* every single-bit flip in the record is rejected (CRC, magic, version) */
@@ -41,10 +43,10 @@ static void test_any_bit_flip_rejected(void)
     }
 }
 
-/* a well-formed record outside +/-10 deg is not trusted */
+/* a well-formed record outside +/-90 deg is not trusted */
 static void test_out_of_range_rejected(void)
 {
-    put(0, 1, 10001, 0, 0, 0);
+    put(0, 1, 90001, 0, 0, 0);
     FinCal c;
     TEST_ASSERT_FALSE(FinCal_Unpack(J, &c));
 }
@@ -71,7 +73,7 @@ static void test_newest_wins_torn_skipped(void)
     FinCal_Scan(J, sizeof J, &s);
     TEST_ASSERT_TRUE(s.cal.valid);
     TEST_ASSERT_EQUAL_UINT16(2, s.cal.seq);
-    TEST_ASSERT_EQUAL_INT16(200, s.cal.off_mdeg[0]);
+    TEST_ASSERT_EQUAL_INT32(200, s.cal.off_mdeg[0]);
     TEST_ASSERT_EQUAL_UINT32(3, s.next);
     TEST_ASSERT_EQUAL_UINT32(1, s.bad);
 }

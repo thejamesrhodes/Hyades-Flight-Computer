@@ -34,10 +34,11 @@ typedef enum {
     PH_DESCENT   = 0x415Bu,
     PH_LANDED    = 0xEEC5u,
     PH_LOCKOUT   = 0x1B9Fu,
-    PH_CATO_SAFE = 0xD32Cu
+    PH_CATO_SAFE = 0xD32Cu,
+    PH_ALIGN     = 0xAD26u     /* CAL-01 canard zero alignment (pad, operator) */
 } Phase;
 
-#define PHASE_COUNT 10u
+#define PHASE_COUNT 11u
 
 typedef struct { uint32_t v; uint32_t inv; } PhaseWord;   /* value + ~value */
 

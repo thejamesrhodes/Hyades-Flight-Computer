@@ -168,6 +168,28 @@ static void test_liftoff_from_settling_is_sequenced(void)
     TEST_ASSERT_EQUAL(PH_BOOST, Flight_Phase(&F));
 }
 
+/* CAL-01: ALIGN holds on the pad (never promotes to READY, never actuates),
+ * and a liftoff while aligning is still sequenced. */
+static void test_align_holds_and_liftoff_sequenced(void)
+{
+    boot_to_ready();
+    Flight_GoPhase(&F, PH_ALIGN);
+    TEST_ASSERT_EQUAL(PH_ALIGN, Flight_Phase(&F));
+    for (uint32_t i = 0u; i < 5u * FRAME_HZ; i++) { step(BOARD_G_MPS2, 0.0f, 0.0f); }
+    TEST_ASSERT_EQUAL(PH_ALIGN, Flight_Phase(&F));
+    TEST_ASSERT_EQUAL(CTRL_MODE_OFF, F.ctrl.mode);
+    for (uint32_t k = 0u; k < 4u; k++) { TEST_ASSERT_EQUAL_FLOAT(0.0f, F.fin[k]); }
+    /* save / cancel: back to SETTLING, and READY needs the full hold again */
+    Flight_GoPhase(&F, PH_SETTLING);
+    for (uint32_t i = 0u; i + 2u < MS_TO_FRAMES(READY_HOLD_MS); i++) { step(BOARD_G_MPS2, 0.0f, 0.0f); }
+    TEST_ASSERT_EQUAL(PH_SETTLING, Flight_Phase(&F));
+    for (uint32_t i = 0u; i < 3u * FRAME_HZ; i++) { step(BOARD_G_MPS2, 0.0f, 0.0f); }
+    TEST_ASSERT_EQUAL(PH_READY, Flight_Phase(&F));
+    Flight_GoPhase(&F, PH_ALIGN);
+    for (uint32_t i = 0u; i < FRAME_HZ; i++) { step(8.0f * BOARD_G_MPS2, 0.0f, 0.0f); }
+    TEST_ASSERT_EQUAL(PH_BOOST, Flight_Phase(&F));
+}
+
 int main(void)
 {
     UNITY_BEGIN();
@@ -178,5 +200,6 @@ int main(void)
     RUN_TEST(test_shadow_mode_holds_canards);
     RUN_TEST(test_corrupt_word_in_flight_goes_cato_then_lands);
     RUN_TEST(test_liftoff_from_settling_is_sequenced);
+    RUN_TEST(test_align_holds_and_liftoff_sequenced);
     return UNITY_END();
 }

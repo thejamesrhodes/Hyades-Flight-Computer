@@ -49,6 +49,6 @@
 
 ## 3. Outputs
 
-- **Servos:** `PWM_SetFin` adds each fin's calibrated zero (CAL-01: stored in the flash journal, set with the `cal` commands) in whole ticks. `PWM_Commit` latches all four channels on one timer update, so there is no skew between canards.
+- **Servos:** `PWM_SetFin` adds each fin's calibrated zero (CAL-01: stored in the flash journal, set with the `cal` commands in the ALIGN phase, up to ±90°) in whole ticks. `PWM_Commit` latches all four channels on one timer update, so there is no skew between canards.
 - **Events:** each `emit()` produces an EVENT log record and console text.
 - **LogQ:** the pre-trigger ring (256 records) is armed in READY and committed at BOOST. The log closes at LANDED + 60 s (see ADR-004).

@@ -31,6 +31,7 @@ void Flight_GoPhase(Flight *f, Phase to)
 {
     const Phase from = Flight_Phase(f);
     if ((from != to) && Phase_Transition(&f->ph, to)) {
+        if (to == PH_SETTLING) { f->ready_hold = 0u; }    /* every way into SETTLING needs the full hold */
         char t[26];
         (void)snprintf(t, sizeof t, "%s->%s", Phase_Name(from), Phase_Name(to));
         emit(f, EV_PHASE, (uint32_t)to, t);
@@ -67,7 +68,7 @@ void Flight_Init(Flight *f, const NavCfg *nav, const DetectCfg *det, uint32_t re
 static void nav_gps(Flight *f, const FlightIn *in, Phase ph)
 {
     if (!in->gps_enabled || !in->gps_new || !in->gps_good) { return; }
-    if ((ph == PH_SETTLING) || (ph == PH_READY)) {
+    if ((ph == PH_SETTLING) || (ph == PH_READY) || (ph == PH_ALIGN)) {
         Nav_PadGps(&f->nav, in->gps_alt_msl);
     } else if ((ph == PH_DESCENT) || (ph == PH_LANDED)) {
         (void)Nav_GpsAlt(&f->nav, in->gps_alt_msl);

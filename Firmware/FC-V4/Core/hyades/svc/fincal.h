@@ -9,8 +9,8 @@
  *   4  seq     u16  increments on every save
  *   6  version u8   FINCAL_VERSION
  *   7  count   u8   4 (fins)
- *   8  off     i16[4]  millidegrees, fin 0 top, 1 right, 2 bottom, 3 left
- *  16  spare   u8[12]  zero
+ *   8  off     i32[4]  millidegrees, fin 0 top, 1 right, 2 bottom, 3 left
+ *  24  spare   u8[4]   zero
  *  28  crc32   u32  IEEE over bytes 0..27
  *
  * A save appends one record: no erase, so it never stalls the frame for more
@@ -26,14 +26,14 @@
 
 #define FINCAL_REC_SIZE    32u
 #define FINCAL_MAGIC       0x4C414346u     /* "FCAL" little-endian */
-#define FINCAL_VERSION     1u
+#define FINCAL_VERSION     2u      /* 2: int32 zeros, +/-90 deg */
 #define FINCAL_FINS        4u
-#define FINCAL_LIMIT_MDEG  10000           /* +/-10 deg: beyond this the linkage is wrong, not the zero */
+#define FINCAL_LIMIT_MDEG  90000           /* +/-90 deg: the servo's half range (any horn indexing) */
 
 typedef struct {
     bool     valid;
     uint16_t seq;
-    int16_t  off_mdeg[FINCAL_FINS];
+    int32_t  off_mdeg[FINCAL_FINS];
 } FinCal;
 
 typedef struct {
@@ -43,10 +43,12 @@ typedef struct {
     uint32_t bad;      /* non-erased slots that are not valid records             */
 } FinCalScan;
 
-void FinCal_Pack(uint8_t out[FINCAL_REC_SIZE], uint16_t seq, const int16_t off_mdeg[FINCAL_FINS]);
+void FinCal_Pack(uint8_t out[FINCAL_REC_SIZE], uint16_t seq, const int32_t off_mdeg[FINCAL_FINS]);
 /* true if magic, version, count, CRC and the +/-limit all check */
 bool FinCal_Unpack(const uint8_t in[FINCAL_REC_SIZE], FinCal *out);
-bool FinCal_InRange(const int16_t off_mdeg[FINCAL_FINS]);
+bool FinCal_InRange(const int32_t off_mdeg[FINCAL_FINS]);
+/* every |zero| <= lim_mdeg (e.g. the limit that keeps full command authority) */
+bool FinCal_Within(const int32_t off_mdeg[FINCAL_FINS], int32_t lim_mdeg);
 void FinCal_Scan(const uint8_t *base, uint32_t size, FinCalScan *s);
 
 #endif /* FINCAL_H_ */

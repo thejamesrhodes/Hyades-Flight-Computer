@@ -30,6 +30,7 @@ void Leds_Update(Phase ph, bool degraded, GpsLed gps, uint32_t t)
     case PH_BOOT:
     case PH_CALIBRATE: sys = true;   break;
     case PH_SETTLING:  sys = blink4; break;
+    case PH_ALIGN:     sys = flick10; break;   /* CAL-01: operator alignment */
     default:           sys = degraded ? flick10 : blip1; break;
     }
     set(SYS_PORT, SYS_PIN, sys);

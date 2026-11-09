@@ -25,9 +25,9 @@ import random
 BUILD = "sim0000"
 LOG_CAP = 384 * 1024 - 4096            # CAL-01: 4 KB calibration journal ahead of the log
 CAL_SLOTS = 128
-CAL_IDLE_S = 60.0
-CAL_LIMIT = 10.0                       # deg
-CAL_STEP = 2.0                         # deg, largest single jog
+CAL_LIMIT = 90.0                       # deg, the servo's half range
+CAL_STEP = 10.0                        # deg, largest single jog
+CAL_FULL_AUTH = 60.0                   # deg, 90 - FIN_DEFLECT_DEG: beyond this READY is held
 REC = 48
 
 
@@ -78,7 +78,6 @@ class SimDevice:
         self.capture = False
         self.align = False
         self.trial = list(self.cal_zero)
-        self.align_t = 0.0
 
     def _emit(self, s: str | bytes) -> None:
         """Caller holds the lock."""
@@ -145,6 +144,8 @@ class SimDevice:
                     if self.cal_seq:
                         self._say(f"[BOOT] fin zero cal seq {self.cal_seq}: " + " ".join(_fx3(v) for v in self.cal_zero)
                                   + f" deg (journal {self.cal_used}/{CAL_SLOTS})")
+                        if not self._full_auth(self.cal_zero):
+                            self._say("[BOOT] fin zero beyond +/-60 deg: the servo end stop would clip the authority, READY is held")
                     else:
                         self._say("[BOOT] fin zero cal: NONE, READY is held - align the canards ('cal begin')")
                     self._say("[BOOT] GPS probe: PA10 rx1 float 0e | PA15 tx1 float 0e | PA3 rx2 high 1843e ~9600 | PA2 tx2 float 0e")
@@ -156,20 +157,12 @@ class SimDevice:
                 if self.phase == "CAL" and t > self.boot_s * 0.4:
                     self._say("[BOOT] gyro bias dps +0.120 -0.034 +0.051 | seed RPY deg +0.4 -1.1 +0.0")
                     self._go("SETTLE")
-                if self.align:
-                    why = None
-                    if self.phase not in ("BOOT", "CAL", "SETTLE"):
-                        why = "phase change"
-                    elif self.active:
-                        why = "HARD fault"
-                    elif time.monotonic() - self.align_t >= CAL_IDLE_S:
-                        why = "idle timeout"
-                    if why:
-                        self.align = False
-                        self.trial = list(self.cal_zero)
-                        self._event(f"fin align ended: {why} (reverted)")
+                if self.align and self.phase != "ALIGN":            # left by a fault (LOCKOUT)
+                    self.align = False
+                    self.trial = list(self.cal_zero)
+                    self._event("fin align ended: HARD fault (reverted)")
                 if (self.phase == "SETTLE" and t > self.boot_s and time.monotonic() - self.settle_t > 1.0
-                        and self.cal_seq and not self.align):
+                        and self.cal_seq and self._full_auth(self.cal_zero)):
                     self._go("READY")
                     self.mode = "FULL"
                 if self.imu_fail and self.phase not in ("LOCKOUT", "CATO"):
@@ -213,7 +206,7 @@ class SimDevice:
                         f"|a|={_fx(1.0, 2)} fin {' '.join(_fx(f, 2) for f in fins)} "
                         f"imu={'FAIL' if self.imu_fail else 'OK'}({int(self.imu_fail)}) loop=910 ovr={self.ovr} "
                         f"gps={gps} s0 alt=+0.0 rx=0 nmea=0 log={len(self.log) * 100 // LOG_CAP}% "
-                        f"h=+0.0 vz=+0.0 q=+0 cal={'ALIGN' if self.align else ('OK' if self.cal_seq else 'NONE')}")
+                        f"h=+0.0 vz=+0.0 q=+0 cal={self._cal_token()}")
 
     # -- 'imu capture': synthetic white + random-walk gyro, white accel, 16-bit counts
     SIM_ODR = 224.2
@@ -283,14 +276,24 @@ class SimDevice:
         self.fw_writes += 1
         threading.Timer(0.3, lambda: self.detach(2.0, "SOFT")).start()
 
+    @staticmethod
+    def _full_auth(z: list) -> bool:
+        return all(abs(v) <= CAL_FULL_AUTH for v in z)
+
     def _cal_line(self) -> None:
         t = self.trial if self.align else self.cal_zero
-        idle = max(0, int(CAL_IDLE_S - (time.monotonic() - self.align_t))) if self.align else 0
-        held = self.align or not self.cal_seq
+        held = self.phase == "ALIGN" or not self.cal_seq or not self._full_auth(self.cal_zero)
         self._say(f"CAL state={'ALIGN' if self.align else 'IDLE'} stored={'OK' if self.cal_seq else 'NONE'} "
                   f"seq={self.cal_seq} zero={','.join(_fx3(v) for v in self.cal_zero)} "
                   f"trial={','.join(_fx3(v) for v in t)} journal={self.cal_used}/{CAL_SLOTS} "
-                  f"idle_s={idle} ready={'held' if held else 'ok'}")
+                  f"auth={'full' if self._full_auth(t) else 'clipped'} ready={'held' if held else 'ok'}")
+
+    def _cal_token(self) -> str:
+        if self.align:
+            return "ALIGN"
+        if not self.cal_seq:
+            return "NONE"
+        return "OK" if self._full_auth(self.cal_zero) else "CLIPPED"
 
     def _cal(self, a: list[str]) -> None:
         """CAL-01 alignment session, same rules and replies as cmd_cal in app.c."""
@@ -299,12 +302,14 @@ class SimDevice:
         if sub == "begin":
             if self.align:
                 err = "session already active"
-            elif self.phase not in ("BOOT", "CAL", "SETTLE"):
-                err = "only on the pad before READY (SETTLING)"
+            elif self.phase not in ("SETTLE", "READY"):
+                err = "only on the pad (SETTLING or READY)"
             elif self.active:
                 err = "a HARD fault is active"
             else:
-                self.align, self.trial, self.align_t = True, list(self.cal_zero), time.monotonic()
+                self.align, self.trial = True, list(self.cal_zero)
+                self._go("ALIGN")
+                self.mode = "OFF"
                 self._event("fin align session started")
         elif sub in ("jog", "set"):
             v = _parse_deg(a[3]) if len(a) > 3 else None
@@ -315,13 +320,13 @@ class SimDevice:
             if not self.align:
                 err = "no session ('cal begin' first)"
             elif sub == "jog" and abs(v) > CAL_STEP:
-                err = "jog larger than 2 deg"
+                err = "jog larger than 10 deg (use 'cal set')"
             else:
                 new = round(self.trial[i] + v if sub == "jog" else v, 3)
                 if abs(new) > CAL_LIMIT:
-                    err = "zero outside +/-10 deg (check the linkage)"
+                    err = "zero outside +/-90 deg (the servo's half range)"
                 else:
-                    self.trial[i], self.align_t = new, time.monotonic()
+                    self.trial[i] = new
         elif sub == "save":
             if not self.align:
                 err = "no session ('cal begin' first)"
@@ -334,12 +339,16 @@ class SimDevice:
                 self.cal_seq += 1
                 self.cal_used += 1
                 self._event(f"fin zero cal saved seq {self.cal_seq}")
+                self._go("SETTLE")
+                self.settle_t = time.monotonic()
         elif sub == "cancel":
             if not self.align:
                 err = "no session ('cal begin' first)"
             else:
                 self.align, self.trial = False, list(self.cal_zero)
                 self._event("fin align cancelled (reverted)")
+                self._go("SETTLE")
+                self.settle_t = time.monotonic()
         elif sub != "show":
             self._say("usage: cal [show|begin|jog <fin> <deg>|set <fin> <deg>|save|cancel]")
             return
@@ -355,7 +364,7 @@ class SimDevice:
             for n, h in (("help", "this list"), ("ver", "build id"), ("stream", "[on|off] periodic status"),
                          ("faults", "FDIR monitors"), ("tasks", "per-task timing"), ("gps", "GNSS detail"),
                          ("imu", "IMU diagnostics"), ("log", "[info|start|stop|erase|pull] flight log"),
-                         ("cal", "[begin|jog f d|set f d|save|cancel] canard zero alignment (pad)"),
+                         ("cal", "[begin|jog f d|set f d|save|cancel] canard zero alignment (ALIGN phase)"),
                          ("fw", "<size> <crc32hex> USB firmware update"), ("reboot", "reset"),
                          ("inject", "wdg|phase|imu bench fault injection")):
                 self._say(f"  {n:<7} {h}")

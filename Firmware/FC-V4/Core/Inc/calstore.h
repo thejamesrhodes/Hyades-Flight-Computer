@@ -22,7 +22,7 @@ typedef struct {
 } CalStore;
 
 void CalStore_Init(CalStore *c);                           /* scan at boot      */
-bool CalStore_Save(CalStore *c, const int16_t off_mdeg[FINCAL_FINS]);  /* false: full / error / range */
+bool CalStore_Save(CalStore *c, const int32_t off_mdeg[FINCAL_FINS]);  /* false: full / error / range */
 bool CalStore_Rewrite(CalStore *c);                        /* after a log erase  */
 bool CalStore_Full(const CalStore *c);
 

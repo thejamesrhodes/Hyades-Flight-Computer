@@ -25,7 +25,7 @@ import zlib
 
 REC = 48
 T_STATE, T_EVENT, T_BOOT, T_AUX = 0x51, 0xE5, 0xB7, 0xA7
-PHASES = ["BOOT", "CAL", "SETTLE", "READY", "BOOST", "COAST", "DESCENT", "LANDED", "LOCKOUT", "CATO"]
+PHASES = ["BOOT", "CAL", "SETTLE", "READY", "BOOST", "COAST", "DESCENT", "LANDED", "LOCKOUT", "CATO", "ALIGN"]
 MODES = ["OFF", "RDAMP", "FULL"]
 
 
@@ -81,9 +81,9 @@ def decode(raw: bytes, outdir: str) -> None:
             arg0, arg1 = struct.unpack_from("<II", r, 12)
             text = r[20:46].split(b"\0")[0].decode("ascii", "replace")
             ph = PHASES[r[2]] if r[2] < len(PHASES) else str(r[2])
-            if r[1] == EV_CAL and text.startswith("fin zero"):       # CAL-01: zeros as int16 mdeg pairs
+            if r[1] == EV_CAL and text.startswith("fin zero"):       # CAL-01: zeros as int16 centidegree pairs
                 z = struct.unpack("<4h", struct.pack("<II", arg0, arg1))
-                text += " deg " + ",".join(f"{v / 1000:+.3f}" for v in z)
+                text += " deg " + ",".join(f"{v / 100:+.2f}" for v in z)
             s["event"].append([t_us / 1e6, ph, r[1], arg0, arg1, text])
     hdr_s = ["t_s", "phase", "mode", "flags", "q0", "q1", "q2", "q3", "wx_dps", "wy_dps", "wz_dps",
              "ax_ms2", "ay_ms2", "az_ms2", "x0", "x1", "x2", "x3", "fin0", "fin1", "fin2", "fin3",
