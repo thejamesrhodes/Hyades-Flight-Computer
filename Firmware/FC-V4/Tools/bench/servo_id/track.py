@@ -139,7 +139,7 @@ def main():
             break
     dt = time.monotonic() - t0
     complete = i >= n - 2                             # some files hold a packet or two that do not decode
-    np.savez_compressed(out, done=(n if complete else i), cand=cand, cells=cells, cmax=cmax, pts=info["pts"], fps=info["fps"],
+    np.savez_compressed(out, done=(n if complete else i), cand=cand, cells=cells, cmax=cmax, pts=info["pts"], fps=info["fps"], rotation=info["rotation"],
                         size=np.array([info["ow"], info["oh"], info["w"], info["h"]]), cell=CELL)
     print(f"{os.path.basename(a.video)}: {info['w']}x{info['h']} at {info['fps']:.2f} fps, {n} frames, "
           f"{info['pts'][-1] - info['pts'][0]:.1f} s; frames {done}..{i} in {dt:.0f} s ({(i - done) / max(dt, 1e-3):.0f} fps)")

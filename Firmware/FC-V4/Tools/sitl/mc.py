@@ -55,6 +55,18 @@ def sample(rng, motor, a):
                  sv_db=0.0,                      # no separate error dead zone seen
                  sv_wn=U(110, 150), sv_zeta=U(0.75, 0.85),   # small steps 130 rad/s (IQR 116-151), zeta 0.80
                  sv_lash=U(0.0015, 0.0038))      # 0.135 deg bare servo; flight-like drive not yet measurable
+    if a.servo == "bench02":
+        # BENCH-02 (14 Nov 2026): joint fit of steps, sines, creep and a flight replay, fin 2 on USB 5 V
+        # (fit_servo.py). sv_tau: 9.3 ms from pulse start less the 1.5 ms pulse read (in sv_extra) and 0-2.5 ms
+        # of camera rolling shutter. sv_rate: model fit 538 deg/s, peak seen on 20-30 deg steps 645-827 deg/s,
+        # measured at the bench supply (sv_volt_k 1).
+        d.update(sv_sod=U(0.0029, 0.0034),      # 0.165-0.195 deg (fit 0.181)
+                 sv_land=U(0.0017, 0.0033),      # landing scatter 0.10-0.19 deg sd
+                 sv_db=0.0,
+                 sv_tau=U(0.0053, 0.0078),
+                 sv_wn=U(120, 140), sv_zeta=U(0.72, 0.80),
+                 sv_rate=U(9.0, 14.4), sv_volt_k=1.0,
+                 sv_lash=U(0.0021, 0.0027))      # 0.12-0.155 deg (fit 0.139)
     for kv in a.set:
         k, v = kv.split("=", 1); d[k] = float(v) if v.replace(".", "", 1).replace("-", "", 1).isdigit() else v
     return d
@@ -130,7 +142,7 @@ def main():
     ap.add_argument("--fin1_sd", type=float, default=0.2, help="single-fin misalignment 1-sigma, deg")
     ap.add_argument("--bear_max", type=float, default=0.012, help="bearing Coulomb torque upper bound, N m")
     ap.add_argument("--seed0", type=int, default=1000)
-    ap.add_argument("--servo", default="legacy", choices=["legacy", "bench01"],
+    ap.add_argument("--servo", default="legacy", choices=["legacy", "bench01", "bench02"],
                     help="legacy = datasheet model (MC-01 A17-A21); bench01 = measured input stage and dynamics (BENCH-01)")
     ap.add_argument("--set", action="append", default=[], help="key=value fixed override")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)

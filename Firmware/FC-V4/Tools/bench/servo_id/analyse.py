@@ -90,14 +90,25 @@ def led_runs(s, t):
         halves = len(seq) - 1
         fi = P.LED_HALF * np.arange(len(seq))                                  # FC frame of each edge
         tmid = 0.5 * (t[ei - 1] + t[ei])
-        beta, alpha = np.polyfit(fi, tmid, 1)                                  # camera s per FC frame, camera time of frame 0
-        a_lo, a_hi = np.max(t[ei - 1] - beta * fi), np.min(t[ei] - beta * fi)    # each edge lies between two frames
-        if a_lo <= a_hi:
-            alpha, a_err = 0.5 * (a_lo + a_hi), 0.5 * (a_hi - a_lo)
-        else:
-            a_err = float(np.std(tmid - (alpha + beta * fi)))
+        # Straight line through the edges plus a rise/fall offset: a frame lit for part of its exposure
+        # reads above the half-way grey level (camera gamma), so rising edges are seen early and falling
+        # edges late by the same amount. Edges more than 3 sd off the fit are dropped (twice at most).
+        rise = np.array([1.0 if e[q][1] else -1.0 for q in seq])
+        keep = np.ones(len(fi), bool)
+        for _ in range(3):
+            A_ = np.c_[np.ones(len(fi)), fi, rise]
+            coef = np.linalg.lstsq(A_[keep], tmid[keep], rcond=None)[0]
+            res = tmid - A_ @ coef
+            sd = max(float(np.std(res[keep])), 1e-5)
+            new_keep = np.abs(res) < 3 * sd + 0.5 / 240
+            if (new_keep == keep).all():
+                break
+            keep = new_keep
+        alpha, beta, rf = (float(c) for c in coef)
+        a_err = float(np.std(res[keep]) / np.sqrt(max(keep.sum() - 3, 1)))      # standard error of alpha
         complete = (not e[seq[-1]][1]) and (halves % 2 == 1)                   # ends on a falling edge
         runs.append(dict(halves=halves, alpha=float(alpha), beta=float(beta), alpha_err=float(a_err), complete=bool(complete),
+                         rise_fall_bias_ms=float(-1e3 * rf), edges_used=int(keep.sum()), edge_residual_sd_ms=float(1e3 * np.std(res[keep])),
                          profile=P.BY_HALVES[halves]["name"] if (complete and halves in P.BY_HALVES) else None,
                          edge_frames=ei.tolist(), contrast=float(hi - lo)))
     return runs
@@ -432,7 +443,9 @@ def analyse(npz, cal_path=None, make_fig=True):
         res = dict(video=name, run=ri + 1, profile=prof["name"], crc=f"{prof['crc']:08X}", frames=prof["frames"],
                    clock_ratio_fc_over_camera=rate, sync_uncertainty_ms=1e3 * r["alpha_err"], led_edges=len(r["edge_frames"]),
                    camera_fps=float(fps_file))
-        print(f"   run {ri + 1}: {prof['name']} ({r['halves']} half periods), sync +/-{1e3 * r['alpha_err']:.2f} ms, FC clock / camera clock = {rate:.6f}")
+        print(f"   run {ri + 1}: {prof['name']} ({r['halves']} half periods), sync +/-{1e3 * r['alpha_err']:.2f} ms "
+              f"({r['edges_used']} of {len(r['edge_frames'])} edges, sd {r['edge_residual_sd_ms']:.2f} ms, rise/fall bias {r['rise_fall_bias_ms']:.2f} ms), "
+              f"FC clock / camera clock = {rate:.6f}")
         if prof["name"] == "sync":
             res["note"] = "LED check only"
             json.dump(res, open(tag + ".json", "w"), indent=1)
@@ -468,15 +481,23 @@ def analyse(npz, cal_path=None, make_fig=True):
         pre = (fcr >= -200) & (fcr < -20) & np.isfinite(ang)
         noise = float(np.std(ang[pre] - np.median(ang[pre]))) if pre.sum() > 20 else float("nan")
         px_per_deg = float(abs(p[1]) * np.pi / 180)
+        # The sensor reads out along the rows of the STORED picture. A video stored landscape and shown
+        # portrait (rotation tag 90/270) reads out across the displayed x axis instead.
+        rot = int(d["rotation"]) if "rotation" in d else 0
+        if abs(rot) % 180 == 90:
+            lx = np.mean([x for _, x in blk]) * cell + cell / 2
+            sep = abs(dot["line"]["cx"] - lx) / (cells.shape[2] * cell)
+        else:
+            sep = abs(dot["row"] - ly) / (cells.shape[1] * cell)
         res.update(dot_found=dot["found"], header_residual_deg=hres, noise_sd_deg=noise, px_per_deg_at_zero=px_per_deg,
-                   rolling_shutter_rows=float(abs(dot["row"] - ly) / (cells.shape[1] * cell)))
+                   rolling_shutter_rows=float(sep), rotation=rot)
         print(f"   dot found in {100 * dot['found']:.1f} % of frames, noise {noise:.4f} deg rms, {px_per_deg:.1f} px/deg (640 px picture), "
               f"header residuals {', '.join(f'{h:+.2f}' for h in hres)} deg ({res['calibration']})")
         if cal and max(abs(h) for h in hres) > 0.5:
             print("   WARNING: header levels are more than 0.5 deg from cal.json: camera or rocket moved since the stair run")
         if res["rolling_shutter_rows"] > 0.1:
-            print(f"   note: LEDs and dot are {100 * res['rolling_shutter_rows']:.0f} % of the picture height apart: timing may be out by up to "
-                  f"{res['rolling_shutter_rows'] * 1000 / fps_file:.1f} ms (rolling shutter). Put the LEDs level with the dot's path.")
+            print(f"   note: LEDs and dot are {100 * res['rolling_shutter_rows']:.0f} % of the picture apart along the sensor readout: "
+                  f"timing may be out by up to {res['rolling_shutter_rows'] * 1000 / fps_file:.1f} ms (rolling shutter)")
         res["result"] = RESULTS[prof["name"]](prof, tfr, ang, noise)
         cmd = np.array(P.command_deg(prof["name"]))
         np.savez_compressed(tag + ".npz", t=tfr, angle=ang, cmd=cmd, s=s, p=p)
