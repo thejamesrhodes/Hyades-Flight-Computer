@@ -1,6 +1,6 @@
 # BENCH-02: servo identification, bench procedure and tools
 
-**Rev 1, 14 November 2026.** **Status:** procedure, firmware and analysis tools written and host-tested. **Not yet run on the board, and no recordings yet** (§8 lists exactly what has and has not been checked).
+**Rev 1, 14 November 2026.** **Status:** procedure, firmware and analysis tools written and host-tested. **Flashed and run on the board 14 Nov; no recordings yet** (§8 lists exactly what has and has not been checked).
 **Applies to:** FC-V4, Blue Bird BMS-127WV+, direct drive, 5 V servo rail from USB (this board's limit).
 **Code:** `Core/hyades/svc/bench.c/h`, `bench_profiles.c` (generated), `bench` command in `Core/Src/app.c`, `CFG_BENCH_PROFILE` in `board.h`; tools in `Tools/bench/servo_id/`.
 **Tests:** `Tests/test_bench.c` (6), `Tests/test_tools.py::BenchProfiles` (3).
@@ -79,6 +79,7 @@ One video per profile. For each: start recording, type the command, wait for `BE
 | 11 | `bench run flightn 2` | 13 s | The same without dither |
 
 - `bench` alone lists the profiles. `bench stop` ends a run.
+- The console's fin readout and plots show the flight law's command, not the bench's: during a run they stay near 0 while the canard moves. The board LEDs and `BENCH done` are the indication.
 - **After 1 and 2, stop and have them checked** before recording the rest. They are the first real footage through the tools (§8).
 - If the phone or the rocket moves after `stair`, record `stair` again: the picture-to-angle map comes from it.
 - Every profile except `sync` starts with 0, +10°, −10°, 0. The analysis uses it to check the picture against the `stair` map.
@@ -110,13 +111,13 @@ One video per profile. For each: start recording, type the command, wait for `BE
 
 | Check | Result |
 |---|---|
-| Host tests (`make`, 16 suites) | pass. `test_bench.c`: the firmware replay gives the CRC `profiles.py` computed for all 11 profiles; LED timing; mask, hold, stop |
+| Host tests (`make`, 17 suites, 122 tests) | pass. `test_bench.c`: the firmware replay gives the CRC `profiles.py` computed for all 11 profiles; LED timing; mask, hold, stop |
 | Tool tests (`make tools`) | pass. The firmware table is the one `profiles.py` generates |
 | Cross-build with the CubeIDE flags (`-Werror`), public ST HAL | compiles and links; sizes in §2 |
 | Synthetic videos through `track.py` + `analyse.py`, six profiles, known servo, camera clock 80 ppm off | profile identified every time; timing error −0.1 to +0.2 ms; angle error 0.014–0.017° rms; threshold 0.225° recovered as 0.225°, rate limit 600°/s as 601°/s, lash 0.135° as 0.143° |
 | Dot detection on real footage | BENCH-01 video 7983 (lit room, red LEDs and the laser module in view): found in 99.5 % of frames, 0.066 px rms at rest |
 | Tools in the PC's Linux shell (ffmpeg 4.4) | run |
-| **CubeIDE build, flash, a run on the board** | **not done** (the console was closed and the board unplugged when this was written) |
+| CubeIDE build, flash, runs on the board (14 Nov) | CubeIDE 2.1.1 build `aa22a1e2+65fe36`: 86 864 B text, 0 warnings, flashed over USB. `bench` lists the 11 profiles with the generated CRCs. `sync` and `flight` played on fin 2 to `BENCH done ... ok`; start to done 5.865 s and 10.715 s, exactly (300 + N) frames at 200 Hz. `bench hold 2 10` gave 711 ticks; `bench stop` aborted. No overruns; WCET sense 1.24 ms, flight 0.57 ms, comms 0.75 ms (budget 4 ms). Nav held h = 0, vz = 0 throughout. **Not seen by me:** the canard actually moving and the LEDs blinking (check by eye on the first run) |
 | **LED detection on real footage** | **not done.** The synthetic LEDs are clean; real ones may be small or clipped. `sync` and `stair` first, then check |
 | **Phone file format** (HEVC, variable frame timing) | not seen yet. The tools read the file's own timestamps |
 

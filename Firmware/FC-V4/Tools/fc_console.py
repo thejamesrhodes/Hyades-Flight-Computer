@@ -1538,34 +1538,71 @@ class App:
 
     def _build_fw(self, ide: str) -> None:
         """Headless CDT build of the Debug config in a scratch workspace, so it
-        works whether or not the CubeIDE GUI is open (its workspace stays locked)."""
+        works whether or not the CubeIDE GUI is open (its workspace stays locked).
+
+        The scratch workspace is named after this project and this CubeIDE install
+        (path and the date of its .ini), so an IDE update starts a fresh one. If
+        CubeIDE still exits before make runs (a stale project entry: 'already exists
+        in the workspace' then '.project is missing', seen after the 2.1.1 update),
+        the build is retried once in a brand-new workspace. The whole output goes
+        to Tools/logs/build_last.txt, with the workspace log if the build failed."""
+        import hashlib
         import tempfile
-        ws = os.path.join(tempfile.gettempdir(), "fcv4_headless_ws")
-        cmd = [ide, "--launcher.suppressErrors", "-nosplash", "-application",
-               "org.eclipse.cdt.managedbuilder.core.headlessbuild", "-data", ws,
-               "-import", FW_ROOT, "-build", "Flight Controller V4/Debug"]
+        ini = os.path.splitext(ide)[0] + ".ini"
+        stamp = str(os.path.getmtime(ini)) if os.path.exists(ini) else ""
+        key = hashlib.md5((FW_ROOT + "|" + ide + "|" + stamp).encode()).hexdigest()[:8]
+        full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "build_last.txt")
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        flags = 0x08000000 if sys.platform.startswith("win") else 0         # CREATE_NO_WINDOW
         self.ui(lambda: self.note("build: headless CubeIDE (Debug), ~20 s"))
         t0 = time.monotonic()
-        flags = 0x08000000 if sys.platform.startswith("win") else 0         # CREATE_NO_WINDOW
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                             text=True, errors="replace", creationflags=flags)
-        result, size_next = None, False
-        for line in p.stdout:
-            line = line.rstrip()
-            show = size_next or bool(re.search(r"\b(error|warning):", line)) or "Build Finished" in line
-            size_next = line.lstrip().startswith("text")                # the arm-none-eabi-size table
-            if show or size_next:
-                self.ui(lambda l=line: self._write([(l, "err" if " error:" in l else "")]))
-            m = re.search(r"Build Finished\. (\d+) errors?, (\d+) warnings?", line)
-            if m:
-                result = (int(m.group(1)), int(m.group(2)))
-        p.wait()
+        with open(full, "w", encoding="utf-8", errors="replace") as logf:   # whole output of the last build
+            for attempt in (0, 1):
+                ws = os.path.join(tempfile.gettempdir(), f"fcv4_headless_{key}" + ("" if attempt == 0 else f"_{int(time.time())}"))
+                cmd = [ide, "--launcher.suppressErrors", "-nosplash", "-application",
+                       "org.eclipse.cdt.managedbuilder.core.headlessbuild", "-data", ws,
+                       "-import", FW_ROOT, "-build", "Flight Controller V4/Debug"]
+                logf.write(f"==== attempt {attempt + 1}, workspace {ws}\n")
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                     text=True, errors="replace", creationflags=flags)
+                result, size_next, reached_make = None, False, False
+                tail = []                               # shown if the build fails without a compiler error line
+                for line in p.stdout:
+                    line = line.rstrip()
+                    logf.write(line + "\n")
+                    tail = (tail + [line])[-25:]
+                    reached_make = reached_make or ("make" in line and "-j" in line) or "Building file" in line \
+                        or "arm-none-eabi" in line or "Build Finished" in line or "Build Failed" in line
+                    show = size_next or bool(re.search(r"\b(error|warning):", line)) or "Build Finished" in line
+                    size_next = line.lstrip().startswith("text")        # the arm-none-eabi-size table
+                    if show or size_next:
+                        self.ui(lambda l=line: self._write([(l, "err" if " error:" in l else "")]))
+                    m = re.search(r"Build Finished\. (\d+) errors?, (\d+) warnings?", line)
+                    if m:
+                        result = (int(m.group(1)), int(m.group(2)))
+                p.wait()
+                if result and result[0] == 0:
+                    break
+                # Eclipse puts the reason a launch failed in the workspace log, not on stdout.
+                with contextlib.suppress(OSError):
+                    with open(os.path.join(ws, ".metadata", ".log"), encoding="utf-8", errors="replace") as f:
+                        logf.write("\n==== " + os.path.join(ws, ".metadata", ".log") + " (last 80 lines) ====\n")
+                        logf.writelines(f.readlines()[-80:])
+                if reached_make:
+                    break                               # a real compile/link failure: no retry
+                if attempt == 0:
+                    self.ui(lambda: self.note("build: CubeIDE stopped before make; retrying in a fresh workspace"))
         dt = time.monotonic() - t0
         if result and result[0] == 0:
             self.ui(lambda: (self._update_elf_label(),
                              self._op_msg(f"build OK in {dt:.0f} s ({result[1]} warnings) - F5 to flash", "ok")))
         else:
-            self.ui(lambda: self._op_msg(f"build FAILED (exit {p.returncode}) - see terminal", "err"))
+            def report(rc=p.returncode, lines=list(tail)):
+                self.note(f"build output, last {len(lines)} lines (all of it: Tools/logs/build_last.txt):", "err")
+                for l in lines:
+                    self.note("  " + l, "err")
+                self._op_msg(f"build FAILED (exit {rc}) - see terminal", "err")
+            self.ui(report)
 
     def choose_elf(self) -> None:
         p = filedialog.askopenfilename(title="Firmware ELF", initialdir=os.path.dirname(self.elf),
