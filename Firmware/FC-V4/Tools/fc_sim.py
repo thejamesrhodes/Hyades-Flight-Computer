@@ -25,9 +25,9 @@ import random
 BUILD = "sim0000"
 LOG_CAP = 384 * 1024 - 4096            # CAL-01: 4 KB calibration journal ahead of the log
 CAL_SLOTS = 128
-CAL_LIMIT = 90.0                       # deg, the servo's half range
+CAL_LIMIT = 65.0                       # deg, servo travel from neutral at 8.889 us/deg (FINCAL_LIMIT_MDEG)
 CAL_STEP = 10.0                        # deg, largest single jog
-CAL_FULL_AUTH = 60.0                   # deg, 90 - FIN_DEFLECT_DEG: beyond this READY is held
+CAL_FULL_AUTH = 35.0                   # deg, FIN_ZERO_FULL_AUTH_MDEG: beyond this READY is held
 REC = 48
 
 
@@ -145,7 +145,7 @@ class SimDevice:
                         self._say(f"[BOOT] fin zero cal seq {self.cal_seq}: " + " ".join(_fx3(v) for v in self.cal_zero)
                                   + f" deg (journal {self.cal_used}/{CAL_SLOTS})")
                         if not self._full_auth(self.cal_zero):
-                            self._say("[BOOT] fin zero beyond +/-60 deg: the servo end stop would clip the authority, READY is held")
+                            self._say(f"[BOOT] fin zero beyond +/-{CAL_FULL_AUTH:.0f} deg: the servo end stop would clip the authority, READY is held")
                     else:
                         self._say("[BOOT] fin zero cal: NONE, READY is held - align the canards ('cal begin')")
                     self._say("[BOOT] GPS probe: PA10 rx1 float 0e | PA15 tx1 float 0e | PA3 rx2 high 1843e ~9600 | PA2 tx2 float 0e")
@@ -222,10 +222,10 @@ class SimDevice:
         sa = self.SIM_ACC_N * (self.SIM_ODR ** 0.5) / 9.80665 * a_lsb
         for _ in range(max(0, due)):
             self.cap_n += 1
-            self.cap_rw += random.gauss(0.0, 0.002)
-            g = [int(round(random.gauss(5.0 + self.cap_rw, sg))) for _ in range(3)]
-            a = [int(round(random.gauss(0.0, sa))), int(round(random.gauss(0.0, sa))),
-                 int(round(random.gauss(a_lsb, sa)))]
+            self.cap_rw += self.cap_rng.gauss(0.0, 0.002)
+            g = [int(round(self.cap_rng.gauss(5.0 + self.cap_rw, sg))) for _ in range(3)]
+            a = [int(round(self.cap_rng.gauss(0.0, sa))), int(round(self.cap_rng.gauss(0.0, sa))),
+                 int(round(self.cap_rng.gauss(a_lsb, sa)))]
             pay = struct.pack("<Ih3h3h", self.cap_n & 0xFFFFFF, 25 * 256, *a, *g)
             body = bytes([MSG_IMU, len(pay)]) + pay
             self._emit(bytes([SYNC0, SYNC1]) + body + struct.pack("<H", binascii.crc_hqx(body, 0xFFFF)))
@@ -324,7 +324,7 @@ class SimDevice:
             else:
                 new = round(self.trial[i] + v if sub == "jog" else v, 3)
                 if abs(new) > CAL_LIMIT:
-                    err = "zero outside +/-90 deg (the servo's half range)"
+                    err = "zero outside +/-65 deg (the servo travel from neutral)"
                 else:
                     self.trial[i] = new
         elif sub == "save":
@@ -366,7 +366,8 @@ class SimDevice:
                          ("imu", "IMU diagnostics"), ("log", "[info|start|stop|erase|pull] flight log"),
                          ("cal", "[begin|jog f d|set f d|save|cancel] canard zero alignment (ALIGN phase)"),
                          ("fw", "<size> <crc32hex> USB firmware update"), ("reboot", "reset"),
-                         ("inject", "wdg|phase|imu bench fault injection")):
+                         ("inject", "wdg|phase|imu bench fault injection"),
+                         ("bench", "[run p f|hold f d|stop] servo identification profiles (BENCH-02, bench build)")):
                 self._say(f"  {n:<7} {h}")
         elif cmd == "ver":
             self._say(f"Hyades FC-V4 (STM32F411, QMI8658A) build {self.builds} 12:00:00, last reset: {self.reset_cause}")
@@ -409,6 +410,9 @@ class SimDevice:
                 self._say("ERR capture running ('reboot' to end)")
                 return
             self.capture, self.cap_t0, self.cap_n, self.cap_rw = True, time.monotonic(), 0, 0.0
+            # Fixed seed: the capture is the same sequence every run, so the host-side noise fit in
+            # test_tools.py is repeatable (unseeded, its 15 % tolerance failed about 1 run in 6).
+            self.cap_rng = random.Random(11)
             self.stream = False
             self._say("IMUCAP v1 odr_mHz=224200 a_lsb_per_g=2048 g_lsb_per_dps_x1000=16000 "
                       "ctrl=40 35 75 00 77 00 03 build=sim0000 (binary IMU frames follow; 'reboot' to end)")
@@ -479,6 +483,8 @@ class SimDevice:
                 return
             self._say("rebooting")
             threading.Timer(0.2, lambda: self.detach(1.5, "SOFT")).start()
+        elif cmd == "bench":
+            self._say("BENCH idle (the simulator has no servos: profiles are not played)")
         elif cmd == "inject":
             if arg == "wdg":
                 self._say("inject wdg: stalling the frame (expect watchdog reset)")

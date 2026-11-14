@@ -2,6 +2,7 @@
  * leds.c  —  see leds.h
  * ============================================================================ */
 #include "leds.h"
+#include "board.h"
 #include "main.h"
 
 #define SYS_PORT LED_2_GPIO_Port
@@ -13,6 +14,14 @@ static void set(GPIO_TypeDef *port, uint16_t pin, bool on)
 {
     HAL_GPIO_WritePin(port, pin, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
+
+#if CFG_BENCH_PROFILE
+void Leds_Bench(bool on)
+{
+    set(SYS_PORT, SYS_PIN, on);
+    set(GPS_PORT, GPS_PIN, on);
+}
+#endif
 
 void Leds_Update(Phase ph, bool degraded, GpsLed gps, uint32_t t)
 {

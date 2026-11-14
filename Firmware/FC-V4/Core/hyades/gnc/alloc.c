@@ -7,7 +7,7 @@
 #define ALLOC_FIN_DEFLECT_RAD (FIN_DEFLECT_DEG * 0.017453292519943295f)
 #define ALLOC_DITHER_NORM     (CTRL_DITHER_AMP_RAD / ALLOC_FIN_DEFLECT_RAD)
 #define ALLOC_TIE_EPS         1.0e-4f   /* ticks: fractional parts closer than this are a tie */
-#define ALLOC_MAX_TICKS       ((int32_t)ALLOC_TICKS_PER_NORM)
+#define ALLOC_MAX_TICKS       ((int32_t)(ALLOC_TICKS_PER_NORM + 0.5f))   /* = Alloc_NormToTicks(1) */
 
 static float clamp_sym(float x, float lim)
 {
@@ -36,7 +36,7 @@ int32_t Alloc_NormToTicks(float norm)
 {
     float x = isfinite(norm) ? norm : 0.0f;
     x = clamp_sym(x, 1.0f);
-    /* |x| <= 1, so |x * ALLOC_TICKS_PER_NORM| <= 1600: in int32 range (std A2) */
+    /* |x| <= 1, so |x * ALLOC_TICKS_PER_NORM| <= 2134: in int32 range (std A2) */
     return (int32_t)lroundf(x * ALLOC_TICKS_PER_NORM);
 }
 

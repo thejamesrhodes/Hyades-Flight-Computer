@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | T1 | BOOT → CALIBRATE | IMU init and self-test pass | `app.c` boot | |
 | T2 | CALIBRATE → SETTLING | 1 s gyro-bias average, IEKF seeded, previous reset not by IWDG | `app.c` boot | |
-| T3 | SETTLING → READY | worst severity = INFO for `READY_HOLD_MS`, and `ready_inhibit` false: a valid canard-zero calibration stored with every zero within ±60° so the ±30° command authority is not clipped (CAL-01), and in the flight build ≥ 200 KB of erased log | arbiter | Log ring arms (if `LOG_AUTOSTART`, log space OK, no firmware update) |
+| T3 | SETTLING → READY | worst severity = INFO for `READY_HOLD_MS`, and `ready_inhibit` false: a valid canard-zero calibration stored with every zero within ±35° so the ±30° command authority is not clipped (CAL-01 §9), and in the flight build ≥ 200 KB of erased log | arbiter | Log ring arms (if `LOG_AUTOSTART`, log space OK, no firmware update) |
 | T4 | READY → BOOST | f_ax > 3 g for 100 ms and nav v_up > 8 m/s, **or** f_ax > 3 g for 300 ms | `Detect_Step` | Log commits; drain starts |
 | T5 | BOOST → COAST | t_boost ≥ 0.1 s and f_ax < 0 for 50 ms | `Detect_Step` | |
 | T6 | COAST → DESCENT | nav valid and v_up < 0 for 50 ms, **or** t_coast ≥ `DET_T_APOGEE_MAX_S` (11.5 s; set per motor, MC-01 §4) | `Detect_Step` | Log drops to 20 Hz; fins OFF |
@@ -74,6 +74,8 @@
 **Fix:** flight versus pad is now taken from `det.last`, the detector's last good phase, held in separate RAM. A corrupt word in flight goes to CATO_SAFE, which can reach LANDED (T16 → T15).
 
 **Test:** `test_corrupt_word_in_flight_goes_cato_then_lands`.
+
+**Update, 10 Nov (REVIEW-01 F17).** Once in CATO_SAFE, `det.last` is CATO_SAFE, which did not count as in flight, so a second corrupt word there went to LOCKOUT and lost LANDED. CATO_SAFE now counts as flight for this decision. Test: `test_corrupt_word_in_cato_stays_cato_then_lands` (fails on the earlier code).
 
 ### F2: CATO_SAFE could never reach LANDED
 

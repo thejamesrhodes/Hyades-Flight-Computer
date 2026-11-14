@@ -13,8 +13,9 @@
  *   its complement; a mismatch reads as corrupt and the caller must go safe.
  * - LOCKOUT and LANDED are terminal. Leaving LOCKOUT needs a reset (human).
  *
- * Detectors for liftoff/burnout/apogee/landing are not implemented yet: the
- * flight transitions exist and are unit-tested, but nothing requests them.
+ * The flight transitions are requested by the detectors (detect.c) through
+ * the arbiter (flight.c). ALIGN (CAL-01) is a pad phase: entered from SETTLING
+ * or READY, left to SETTLING (save/cancel), BOOST (liftoff) or LOCKOUT.
  *
  * Pure module: no I/O, no globals.
  * ============================================================================ */

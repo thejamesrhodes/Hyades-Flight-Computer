@@ -772,17 +772,18 @@ class App:
             self.cal_jog_btns.append(b)
             self.cal_rows.append(row)
         note = tk.Label(body, anchor="w", justify="left", font=self.f_ui, wraplength=940, text=(
-            "Angles are at the servo. 0.02 deg is about one PWM tick (0.019 deg). A zero can be anything within "
-            "+/-90 deg, so any horn indexing can be taken out; one jog is at most 10 deg (use Set for more). Beyond "
-            "+/-60 deg the servo end stop would clip the +/-30 deg command authority, so READY is held. Every save "
+            "Angles are at the servo (8.889 us/deg). One PWM tick is 0.014 deg, but the servo takes a new target only "
+            "after a 2 us change (0.225 deg), so fine jogs act in steps of about 0.2 deg. A zero can be anything within "
+            "+/-65 deg, so any horn indexing can be taken out; one jog is at most 10 deg (use Set for more). Beyond "
+            "+/-35 deg the pulse limit would clip the +/-30 deg command authority, so READY is held. Every save "
             "is appended to a flash journal, recorded in the next flight log and kept through firmware updates."))
         note.pack(fill="x", pady=(8, 0))
         self.dim_labels.append(note)
 
     def cal_set(self, i: int, e: tk.Entry) -> None:
         txt = e.get().strip()
-        if not re.fullmatch(r"[+-]?(\d{1,2}(\.\d{0,3})?|\.\d{1,3})", txt) or abs(float(txt)) > 90.0:
-            self.note(f"canard {i}: '{txt}' is not an angle within +/-90 deg (up to 3 decimals, e.g. -0.125)", "err")
+        if not re.fullmatch(r"[+-]?(\d{1,2}(\.\d{0,3})?|\.\d{1,3})", txt) or abs(float(txt)) > 65.0:
+            self.note(f"canard {i}: '{txt}' is not an angle within +/-65 deg (up to 3 decimals, e.g. -0.125)", "err")
             return
         if self.send(f"cal set {i} {txt}"):
             e.delete(0, "end")
@@ -792,7 +793,7 @@ class App:
         if not c or c["state"] != "ALIGN":
             return
         rows = "\n".join(f"  {n:<9} {z:+.3f}  ->  {t:+.3f} deg" for n, z, t in zip(link.FIN_NAMES, c["zero"], c["trial"]))
-        warn = "" if c["auth"] == "full" else ("\n\nA zero beyond +/-60 deg clips the command authority: "
+        warn = "" if c["auth"] == "full" else ("\n\nA zero beyond +/-35 deg clips the command authority: "
                                                "READY will stay held until it is re-aligned.")
         if messagebox.askokcancel(APP, "Save these canard zeros to the flight computer?\n\n" + rows +
                                   "\n\nThey apply to every flight until the next save. The board returns to "

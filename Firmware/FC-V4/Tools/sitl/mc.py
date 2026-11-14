@@ -45,6 +45,16 @@ def sample(rng, motor, a):
                  fault_val=float(rng.choice([-1.0, 1.0]) * (U(0.5, 3.0) if a.fault == "offset" else 1.0)))
     if a.shadow:
         d["shadow"] = 1
+    if a.servo == "bench01":
+        # BENCH-01 (10 Nov 2026) measured actuator, in true canard angle. The bench values were taken in
+        # commanded degrees at the old 6.667 us/deg; x 0.75 gives the angle at the maker's 8.889 us/deg that
+        # board.h now uses. Drawn after every legacy draw, so the same seed gives the same flight as the
+        # legacy model apart from the servo.
+        d.update(sv_sod=U(0.0035, 0.0043),      # new target only after a 2.0 us (0.225 deg) command change, +/-10 %
+                 sv_land=U(0.0023, 0.0034),      # landing error per target, 1-sigma 0.14-0.18 deg
+                 sv_db=0.0,                      # no separate error dead zone seen
+                 sv_wn=U(110, 150), sv_zeta=U(0.75, 0.85),   # small steps 130 rad/s (IQR 116-151), zeta 0.80
+                 sv_lash=U(0.0015, 0.0038))      # 0.135 deg bare servo; flight-like drive not yet measurable
     for kv in a.set:
         k, v = kv.split("=", 1); d[k] = float(v) if v.replace(".", "", 1).replace("-", "", 1).isdigit() else v
     return d
@@ -120,6 +130,8 @@ def main():
     ap.add_argument("--fin1_sd", type=float, default=0.2, help="single-fin misalignment 1-sigma, deg")
     ap.add_argument("--bear_max", type=float, default=0.012, help="bearing Coulomb torque upper bound, N m")
     ap.add_argument("--seed0", type=int, default=1000)
+    ap.add_argument("--servo", default="legacy", choices=["legacy", "bench01"],
+                    help="legacy = datasheet model (MC-01 A17-A21); bench01 = measured input stage and dynamics (BENCH-01)")
     ap.add_argument("--set", action="append", default=[], help="key=value fixed override")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     a = ap.parse_args()

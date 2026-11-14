@@ -20,5 +20,7 @@
 typedef enum { GPS_LED_NONE = 0, GPS_LED_NOFIX, GPS_LED_FIX } GpsLed;
 
 void Leds_Update(Phase ph, bool degraded, GpsLed gps, uint32_t t_ms);
+/* Bench only (BENCH-02): both LEDs as one camera timing mark. */
+void Leds_Bench(bool on);
 
 #endif /* LEDS_H_ */

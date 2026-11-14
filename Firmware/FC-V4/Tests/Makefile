@@ -12,7 +12,7 @@ CFLAGS  := -std=c11 -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
            -Iunity -I$(CORE)/math -I$(CORE)/gnc -I$(CORE)/mission -I$(CORE)/svc -I../Core/Inc
 OUT     := ../build-host
 
-TESTS := test_crc test_nmea test_logrec test_phase test_fdir test_control test_iekf test_nav test_detect test_logq test_flight test_dither test_alloc test_fincal test_align
+TESTS := test_crc test_nmea test_logrec test_phase test_fdir test_control test_iekf test_nav test_detect test_logq test_flight test_dither test_alloc test_fincal test_align test_bench
 
 SRC_test_crc     := $(CORE)/svc/crc.c
 SRC_test_nmea    := $(CORE)/svc/nmea.c
@@ -28,6 +28,8 @@ DEF_alloc        := -DCTRL_ALLOC_STAGGER=1 -DCTRL_DITHER_NULL=1 -DPWM_TICK_HZ=80
 DEF_dither       := -DCTRL_DITHER_NULL=0
 SRC_test_fincal  := $(CORE)/svc/fincal.c $(CORE)/svc/crc.c
 SRC_test_align   := $(CORE)/mission/align.c
+SRC_test_bench   := $(CORE)/svc/bench.c $(CORE)/svc/bench_profiles.c $(CORE)/svc/crc.c $(CORE)/gnc/alloc.c
+DEF_bench        := -DCFG_BENCH_PROFILE=1
 SRC_test_iekf    := $(CORE)/gnc/iekf.c
 SRC_test_nav     := $(CORE)/gnc/nav.c
 SRC_test_detect  := $(CORE)/mission/detect.c $(CORE)/mission/phase.c

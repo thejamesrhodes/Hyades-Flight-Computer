@@ -102,9 +102,12 @@ static void test_roll_priority_saturation(void)
 static void test_norm_to_ticks_safe(void)
 {
     TEST_ASSERT_EQUAL_INT32(0, Alloc_NormToTicks(NAN));
-    TEST_ASSERT_EQUAL_INT32((int32_t)ALLOC_TICKS_PER_NORM, Alloc_NormToTicks(5.0f));
-    TEST_ASSERT_EQUAL_INT32(-(int32_t)ALLOC_TICKS_PER_NORM, Alloc_NormToTicks(-5.0f));
+    TEST_ASSERT_EQUAL_INT32((int32_t)lroundf(ALLOC_TICKS_PER_NORM), Alloc_NormToTicks(5.0f));
+    TEST_ASSERT_EQUAL_INT32(-(int32_t)lroundf(ALLOC_TICKS_PER_NORM), Alloc_NormToTicks(-5.0f));
     TEST_ASSERT_EQUAL_INT32(0, Alloc_NormToTicks(-INFINITY));   /* non-finite -> centre */
+    /* the servo scale: 30 deg at the maker's 8.889 us/deg is 266.7 us (REVIEW-01 F1) */
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.889f, ALLOC_US_PER_DEG);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 266.67f, ALLOC_TICKS_PER_NORM / (float)PWM_TICKS_PER_US);
 }
 
 int main(void)

@@ -6,7 +6,7 @@
  *   accel : m/s^2 specific force, no bias removal (see IMU_CalibrateGyro)
  *   gyro  : dps, boot zero-rate bias removed (the IEKF tracks the residual)
  * Sensor: +/-16 g, +/-2048 dps, 448.4 Hz ODR (ADR-004; 224.2 Hz until 7 Nov), LPF 13.37 % ODR (~60 Hz AAF for
- * the 100 Hz frame). One coherent latest-sample read per call: ~0.68 ms typ,
+ * the 200 Hz frame). One coherent latest-sample read per call: ~0.68 ms typ,
  * 1.25 ms max blocking on 400 kHz I2C (bench, 2026-11-02). Blocking HAL I2C
  * with a length-scaled timeout is a documented deviation from std C6 on this
  * board; the H743 build moves the IMU to SPI + DMA.

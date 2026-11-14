@@ -7,7 +7,10 @@
 #include <string.h>
 
 #define G_STD          9.80665f
-#define G_AVG_MAX_N    4096u           /* pad gravity average saturates here   */
+/* Running means: the exact mean of the first N samples, then gain 1/N (time
+ * constant N frames). Both follow a change of attitude or temperature. */
+#define G_AVG_N        400u            /* pad gravity reference: 2 s at 200 Hz */
+#define F_AVG_N        100u            /* |f| steadiness reference: 0.5 s      */
 #define GPS_AVG_MAX_N  600u            /* ~10 min of 1 Hz pad fixes            */
 #define ISA_T0         288.15f         /* K                                    */
 #define ISA_P0         101325.0f       /* Pa                                   */
@@ -61,13 +64,22 @@ void Nav_Step(Nav *n, const float q[4], const float f[3], const float w[3], floa
     const float fmag = v3_norm(f);
     const bool clipped = (fabsf(f[0]) >= n->c.sat_mps2) || (fabsf(f[1]) >= n->c.sat_mps2)
                       || (fabsf(f[2]) >= n->c.sat_mps2);
-    const bool still = (fabsf(fmag - n->g_ref) < n->c.still_acc_mps2)
-                    && (v3_norm(w) < n->c.still_gyro_radps) && !clipped;
+    /* Stationary = slow rotation, |f| plausibly 1 g and |f| steady against its
+     * own running mean (nav.h). Samples outside the 1 g band (liftoff, a
+     * shock) do not enter the mean, so they cannot drag the reference. */
+    const bool near_g = isfinite(fmag) && (fabsf(fmag - G_STD) < n->c.still_band_mps2);
+    bool steady = false;
+    if (near_g) {
+        steady = (n->f_n == 0u) || (fabsf(fmag - n->f_mean) < n->c.still_acc_mps2);
+        if (n->f_n < F_AVG_N) { n->f_n++; }
+        n->f_mean += (fmag - n->f_mean) / (float)n->f_n;
+    }
+    const bool still = near_g && steady && (v3_norm(w) < n->c.still_gyro_radps) && !clipped;
 
     if (on_pad && still) {
         /* Stationary on the pad: refresh the gravity reference, hold zero. */
-        if (n->g_n < G_AVG_MAX_N) { n->g_sum += fn[2]; n->g_n++; }
-        n->g_ref = n->g_sum / (float)n->g_n;
+        if (n->g_n < G_AVG_N) { n->g_n++; }
+        n->g_ref += (fn[2] - n->g_ref) / (float)n->g_n;
         n->flags |= NAV_F_INIT | NAV_F_STILL;
         n->flags &= ~(NAV_F_SAT | NAV_F_GPS_AIDED);
         n->sat_count = 0u;

@@ -19,8 +19,9 @@
  * ROLL LAW (CTRL_ROLL_LAW). 0 = INDI as below. 1 = the Matlab roll-tuning
  * design (controller.m, Mode 1): delta = -Kp(q) p + trim, Kp = c/q_e with
  * q_e = clamp(q_hat, CTRL_ROLL_Q_MIN, ..), plus the bounded trim integrator
- * (dead band, rate limit, clamp, freeze on saturation). Dither is NOT carried
- * across: 125 Hz cannot be produced by a 100 Hz loop. Fins: all four take
+ * (dead band, rate limit, clamp, freeze on saturation). The dither is a 50 Hz
+ * square wave (CTRL_DITHER_*): on the null axis in the allocator (ALLOC-01),
+ * or on the roll command with CTRL_DITHER_NULL 0. Fins: all four take
  * delta / FIN_DEFLECT (roll common mode), limited to the canard travel.
  *
  * MODES (degraded-mode ladder, h743_flight_architecture 4.1). Each step down

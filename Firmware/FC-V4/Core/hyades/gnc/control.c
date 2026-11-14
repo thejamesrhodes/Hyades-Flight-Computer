@@ -139,7 +139,8 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
      * +a +a -a -a at the frame rate (FRAME_HZ / CTRL_DITHER_PERIOD_N = 50 Hz at
      * 200 Hz). It keeps the servo's internal position error moving across its
      * dead band so the dead-band/quantiser limit cycle cannot lock, and the
-     * surface barely follows it (servo f_N ~12.7 Hz: about 6 % at 50 Hz). The
+     * surface barely follows it (servo f_N 21 Hz measured, BENCH-01: about 17 %
+     * at 50 Hz; the 6 % in ADR-004 assumed 12.7 Hz). The
      * Matlab design used 125 Hz, above what a 200 Hz servo frame can carry;
      * P.Dither notes 60-80 Hz as the fallback for a capped frame rate. Added
      * after the trim saturation test, so it never winds the trim. */

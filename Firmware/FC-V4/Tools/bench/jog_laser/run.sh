@@ -1,5 +1,6 @@
 #!/bin/sh
 # BENCH-01 canard jog laser test: video -> dot track -> per-jog metrics -> figures.
+# SUPERSEDED by reanalysis/ (BENCH-01 rev 2): see the note at the top of analyse.py.
 # Usage: ./run.sh <dir with 7983.mp4 and 7984.mp4>   (videos are not in the repo; tracks are in data/)
 # Session-specific constants: the log windows in match.py and the starting angles in steps2.py.
 set -e

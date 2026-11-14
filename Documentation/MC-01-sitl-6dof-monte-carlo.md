@@ -84,6 +84,15 @@ Status codes:
 | A25 | Recovery | 0.6 m chute | delay U(0.5, 3) s; swing U(3, 12)°; collapse U(2, 30) s | A | OpenRocket .ork; Phase 2 recovery sim. |
 | A26 | Site elevation | 110 m | — | A | MRC survey or GPS on the day. The density effect is about 1 % per 100 m. |
 
+**Bench update, 10 Nov (BENCH-01 rev 3, REVIEW-01 rev 2).** A17–A21 have first measurements (unloaded, one servo), in true canard angle at the corrected 8.889 µs/°:
+- A17: dead time under about 13 ms for steps of 0.75° or more; 0.225° updates start 21–28 ms later.
+- A18: f_N 130 rad/s (110–150), ζ 0.8.
+- A19: the dead band is a 2.0 µs threshold on the input, 0.0039 rad. That is the top of the range above, and of a different form.
+- A20: lash about 0.0024 rad (bare servo).
+- A21: 5.4–6.3 rad/s seen on 7.5° steps, a lower bound.
+- `mc.py --servo bench01` runs the measured model. Default dispersions, 360 paired flights: 96.4 % against 96.7 % for the legacy servo model. Build tolerances, 1 200 paired flights: **100 %** against 99.8 %, with coast RMS p95 19.9 °/s and peak p95 111 °/s (max 238), so G1 and G2 hold (REVIEW-01 §3). The rows above still describe the default run.
+- **Pulse scale (REVIEW-01 F1): closed 10 Nov.** The firmware had commanded 6.667 µs/° while the servo follows 8.889, so every canard angle flown would have been 0.75 of nominal. `board.h` is corrected. The simulations here always took true = commanded, so they describe the corrected firmware.
+
 ## 3. Requirements (confirmed by James on 8 Nov; roll and lock-in tightened to the verified design)
 
 | ID | Requirement | Rationale |
@@ -177,6 +186,7 @@ python make_tables.py <motor-database/data/thrustcurve.org>   # aero.csv, motors
 make                                                          # sitl (the flight core is compiled in)
 python mc.py --n 200 --cant_sd 0.1 --fin1_sd 0.1 --bear_max 0.006 --out runs/V_active
 python mc.py --n 40 --fault hardover --out runs/V_fault_hardover
+python mc.py --n 60 --servo bench01 --out runs/bench01                  # measured servo (BENCH-01 rev 2)
 python mc.py --n 30 "--variant=-DCTRL_ROLL_C=18.0f" --out runs/c18      # gain sweeps
 python rerun.py runs/V_active/runs.csv <seed> trace.csv                 # one run with a trace
 python mc_figures.py

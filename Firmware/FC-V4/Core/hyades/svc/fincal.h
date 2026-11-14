@@ -7,7 +7,7 @@
  *
  *   0  magic   u32  'FCAL'
  *   4  seq     u16  increments on every save
- *   6  version u8   FINCAL_VERSION
+ *   6  version u8   FINCAL_VERSION (FINCAL_VERSION_OLD is read and converted)
  *   7  count   u8   4 (fins)
  *   8  off     i32[4]  millidegrees, fin 0 top, 1 right, 2 bottom, 3 left
  *  24  spare   u8[4]   zero
@@ -26,14 +26,19 @@
 
 #define FINCAL_REC_SIZE    32u
 #define FINCAL_MAGIC       0x4C414346u     /* "FCAL" little-endian */
-#define FINCAL_VERSION     2u      /* 2: int32 zeros, +/-90 deg */
+#define FINCAL_VERSION     3u      /* 3: degrees at the maker's 8.889 us/deg, +/-65 deg */
+#define FINCAL_VERSION_OLD 2u      /* 2: degrees at 6.667 us/deg (firmware before 10 Nov 2026), +/-90
+                                    * deg. Still read: each zero is converted x 3/4, which is the
+                                    * same pulse, so an alignment made at the old scale holds. */
+#define FINCAL_LIMIT_OLD_MDEG 90000
 #define FINCAL_FINS        4u
-#define FINCAL_LIMIT_MDEG  90000           /* +/-90 deg: the servo's half range (any horn indexing) */
+#define FINCAL_LIMIT_MDEG  65000           /* +/-65 deg: the neutral pulse stays inside SERVO_MIN..MAX_US (pwm.c) */
 
 typedef struct {
     bool     valid;
     uint16_t seq;
-    int32_t  off_mdeg[FINCAL_FINS];
+    uint8_t  version;                  /* the record it was read from (FINCAL_VERSION_OLD: converted) */
+    int32_t  off_mdeg[FINCAL_FINS];    /* always at the current scale */
 } FinCal;
 
 typedef struct {

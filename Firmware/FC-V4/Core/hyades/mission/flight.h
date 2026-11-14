@@ -7,8 +7,8 @@
  *
  * This is the code that flies. It was lifted out of app.c so that exactly the
  * same object code path runs on the target (app.c calls Flight_Step) and on
- * the host in software-in-the-loop Monte Carlo (Tools/sitl.py loads it as a
- * shared library). No HAL, no I/O, no globals: every side effect leaves
+ * the host in software-in-the-loop Monte Carlo (Tools/sitl/sitl.c links the
+ * same sources). No HAL, no I/O, no globals: every side effect leaves
  * through the event callback or the output fields.
  *
  * Ordering rules carried over from app.c (each one was a HITL-found defect):

@@ -14,8 +14,8 @@
  * every fin to 0, so each canard sits exactly on its trial zero. Leaving ALIGN
  * any way but save restores the stored zero.
  *
- * Limits: a zero within +/-FINCAL_LIMIT_MDEG (the servo's half range, so any
- * horn indexing can be corrected) and one jog within +/-ALIGN_STEP_MAX_MDEG.
+ * Limits: a zero within +/-FINCAL_LIMIT_MDEG (the servo travel from neutral, so
+ * any horn indexing can be corrected) and one jog within +/-ALIGN_STEP_MAX_MDEG.
  * Out-of-range input is refused, never clamped.
  *
  * Pure module (no I/O, no globals). Angles are integer millidegrees.

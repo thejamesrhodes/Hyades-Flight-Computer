@@ -35,7 +35,7 @@ static void test_commands_need_session(void)
     TEST_ASSERT_EQUAL_PTR(STORED, Align_Zero(&A, STORED));
 }
 
-/* jogs accumulate on the trial zero; the zero reaches +/-90 deg; out-of-range
+/* jogs accumulate on the trial zero; the zero reaches +/-65 deg; out-of-range
  * input is refused, not clamped */
 static void test_jog_set_limits(void)
 {
@@ -45,11 +45,11 @@ static void test_jog_set_limits(void)
     TEST_ASSERT_EQUAL_INT(AL_ERR_FIN, Align_Jog(&A, 4u, 10));
     TEST_ASSERT_EQUAL_INT(AL_OK, Align_Jog(&A, 1u, -10000));
     TEST_ASSERT_EQUAL_INT(AL_ERR_STEP, Align_Jog(&A, 0u, 10001));
-    TEST_ASSERT_EQUAL_INT(AL_OK, Align_Set(&A, 0u, 89900));
-    TEST_ASSERT_EQUAL_INT(AL_OK, Align_Set(&A, 3u, -90000));
+    TEST_ASSERT_EQUAL_INT(AL_OK, Align_Set(&A, 0u, 64900));
+    TEST_ASSERT_EQUAL_INT(AL_OK, Align_Set(&A, 3u, -65000));
     TEST_ASSERT_EQUAL_INT(AL_ERR_RANGE, Align_Jog(&A, 0u, 200));
-    TEST_ASSERT_EQUAL_INT32(89900, A.trial[0]);                 /* unchanged after a refusal */
-    TEST_ASSERT_EQUAL_INT(AL_ERR_RANGE, Align_Set(&A, 1u, -90001));
+    TEST_ASSERT_EQUAL_INT32(64900, A.trial[0]);                 /* unchanged after a refusal */
+    TEST_ASSERT_EQUAL_INT(AL_ERR_RANGE, Align_Set(&A, 1u, -65001));
 }
 
 /* save keeps the trial; cancel reverts to stored */

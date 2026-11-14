@@ -1,7 +1,7 @@
 /* ============================================================================
  * detect.h  —  Flight-event detectors: liftoff, burnout, apogee, landing
  *
- * Requests the next flight phase; the arbiter (task_fdir) applies it through
+ * Requests the next flight phase; the arbiter (flight.c) applies it through
  * Phase_Transition, so the table's one-way rules still decide. Each detector
  * is a persistence counter on a threshold well separated from the pad/noise
  * level. This is a SIMPLIFICATION of the FDS-01 §5.3 SPRT (no likelihood

@@ -119,8 +119,9 @@ static void monitor_and_arbitrate(Flight *f, const FlightIn *in, float dt)
     if (!Phase_Read(&f->ph, &ph)) {                /* protected word corrupt */
         /* STM-01 F1: decide flight vs pad from the detector's last good phase,
          * so a corrupt word in flight lands in CATO_SAFE (which can still
-         * reach LANDED), not LOCKOUT (terminal). */
-        Phase_ForceSafe(&f->ph, Phase_InFlight(f->det.last));
+         * reach LANDED), not LOCKOUT (terminal). CATO_SAFE counts as flight
+         * here: a second upset must not cost the LANDED detection. */
+        Phase_ForceSafe(&f->ph, Phase_InFlight(f->det.last) || (f->det.last == PH_CATO_SAFE));
         emit(f, EV_CORRUPT, 0u, "phase word corrupt");
         ph = Flight_Phase(f);
     }

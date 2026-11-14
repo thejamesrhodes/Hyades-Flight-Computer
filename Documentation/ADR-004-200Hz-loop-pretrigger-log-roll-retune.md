@@ -81,6 +81,8 @@ Figure: `Images/adr004/loop_margins.png`.
 
 The nonlinear Monte Carlo stayed stable up to c = 26, but saturation and the dead band hide early oscillation, so margins rather than pass rates choose c. **c can rise to 18–20 once the servo bench measures τ_d and f_N** (BP-01 §4). That is the cheapest available improvement in roll stiffness.
 
+> **Bench update, 10 Nov (BENCH-01 rev 2, REVIEW-01 §3).** Measured unloaded: f_N 130 rad/s, ζ 0.8, and a dead time under about 13 ms for steps of 0.75° or more. At c = 15 with τ_d 14 ms that gives PM 70.2°, GM 12.2 dB. Sub-degree moves started 21–28 ms later in the quasi-static test. With τ_d 39 ms, c = 15 gives 54.6°, 7.6 dB (38.3°, 4.5 dB at Ixx −30 %) and c = 18 gives 26.9°, 3.0 dB at that corner. **c stays 15 until a dynamic test with dither shows the small-move delay is absent.** `Tools/sitl/roll_margins.py` reproduces the table above.
+
 ### 3.3 Trim
 
 These choices come from a factorial over c, band, trim form and q floor: 22 variants × 120–180 dispersed flights.
@@ -106,7 +108,7 @@ The roll command carries the MATLAB `P.Dither`: a square wave of ±`CTRL_DITHER_
 - It is added after the trim saturation test, so it never winds the trim.
 - It is reset when control goes OFF. Shadow mode logs it but does not apply it.
 - The MATLAB design used 125 Hz, which a 200 Hz servo frame cannot carry (Nyquist 100 Hz). The `P.Dither` note already named 60–80 Hz as the fallback for a capped frame rate.
-- At the servo's 12.7 Hz (assumed) bandwidth, the surface follows about 6 % of the 50 Hz dither.
+- At the servo's 12.7 Hz (assumed) bandwidth, the surface follows about 6 % of the 50 Hz dither. Measured 21 Hz (BENCH-01 rev 2): about 17 %.
 - `test_dither.c` (3 tests): wave shape and zero mean, no trim wind-up, reset on OFF.
 
 MC-01 A/B over 600 matched flights with build tolerances:
@@ -118,6 +120,8 @@ MC-01 A/B over 600 matched flights with build tolerances:
 | Dither 100 Hz | 10.9 / 22.2 / 43.8 °/s | 75 °/s | 2.81° |
 
 The benefit depends on the servo's real dead-band behaviour, which is still unmeasured. The servo bench (BP-01 §4) should repeat this A/B on the real servo.
+
+> **Bench update, 10 Nov (BENCH-01 rev 2, REVIEW-01 §3).** The dead band is a 2.0 µs threshold on the input. With that model in the SITL the dither is worth 5.9 °/s of coast roll RMS (3.8 with the legacy model). At the servo scale corrected on 10 Nov (8.889 µs/°) its amplitude is ±1.5 µs, 3.0 µs peak to peak against the 2.0 µs threshold, as designed; at the earlier scale it was 2.25 µs (REVIEW-01 F8). The A/B on the real servo is still to do.
 
 ### 3.6 Sources of truth
 

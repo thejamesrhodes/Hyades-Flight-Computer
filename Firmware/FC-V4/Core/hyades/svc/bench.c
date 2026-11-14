@@ -1,0 +1,151 @@
+/* ============================================================================
+ * bench.c  —  see bench.h (BENCH-02). Bench builds only.
+ * ============================================================================ */
+#include "bench.h"
+
+#if CFG_BENCH_PROFILE
+
+#include "crc.h"
+#include <string.h>
+
+/* The profiles are written in ticks at this scale (profiles.py): 9600 ticks
+ * over 135 deg. A change of the servo scale or the timer tick needs them
+ * regenerated. */
+_Static_assert((((SERVO_MAX_US - SERVO_MIN_US) * PWM_TICKS_PER_US) == 9600u) && (((int32_t)SERVO_RANGE_DEG) == 135),
+               "bench profiles are in ticks at 9600 ticks per 135 deg: regenerate (profiles.py)");
+
+static int32_t clamp_ticks(int32_t t)
+{
+    if (t > BENCH_TICKS_MAX) { return BENCH_TICKS_MAX; }
+    if (t < -BENCH_TICKS_MAX) { return -BENCH_TICKS_MAX; }
+    return t;
+}
+
+/* num / den, den > 0, rounded half away from zero. */
+static int32_t div_round(int32_t num, int32_t den)
+{
+    return (num >= 0) ? ((num + (den / 2)) / den) : -(((-num) + (den / 2)) / den);
+}
+
+/* 32767 x sin(2 pi idx / 1024), idx 0..1023, from the quarter table. */
+static int32_t sin_q15(uint32_t idx)
+{
+    const uint32_t r = idx & 255u;
+    switch ((idx >> 8) & 3u) {
+    case 0u:  return (int32_t)k_bench_sin_q[r];
+    case 1u:  return (int32_t)k_bench_sin_q[256u - r];
+    case 2u:  return -(int32_t)k_bench_sin_q[r];
+    default:  return -(int32_t)k_bench_sin_q[256u - r];
+    }
+}
+
+void Bench_Init(Bench *b) { memset(b, 0, sizeof *b); }
+
+bool Bench_Start(Bench *b, const BenchProfile *p, uint8_t mask)
+{
+    if ((p == NULL) || (p->nseg == 0u) || ((mask & BENCH_MASK_ALL) == 0u)) { return false; }
+    memset(b, 0, sizeof *b);
+    b->p = p;
+    b->mask = mask & BENCH_MASK_ALL;
+    b->st = BENCH_PRE;
+    return true;
+}
+
+void Bench_Hold(Bench *b, uint8_t mask, int32_t ticks)
+{
+    memset(b, 0, sizeof *b);
+    b->mask = mask & BENCH_MASK_ALL;
+    b->val = clamp_ticks(ticks);
+    b->st = BENCH_HOLD;
+}
+
+void Bench_Stop(Bench *b) { b->st = BENCH_IDLE; }
+
+/* Value of segment s at its frame b->j (0-based). */
+static int32_t seg_value(const Bench *b, const BenchSeg *s)
+{
+    const int32_t a = (int32_t)s->a;
+    if (s->kind == (uint8_t)BSEG_MOVE) {
+        const uint32_t r = s->b;
+        if ((r <= 1u) || ((b->j + 1u) >= r)) { return a; }
+        return b->base + div_round((a - b->base) * (int32_t)(b->j + 1u), (int32_t)r);
+    }
+    if (s->kind == (uint8_t)BSEG_SINE) {
+        const uint32_t inc = 0xFFFFFFFFu / ((s->b >= 2u) ? (uint32_t)s->b : 2u);
+        const int32_t num = a * sin_q15((b->j * inc) >> 22);       /* phase wraps mod 2^32 by design */
+        return b->base + ((num >= 0) ? ((num + 16384) >> 15) : -(((-num) + 16384) >> 15));
+    }
+    /* BSEG_TABLE: running sum of per-frame steps */
+    if ((a < 0) || ((uint32_t)a >= k_bench_ntables) || (b->j >= k_bench_table_len[a])) { return b->val; }
+    return b->val + (int32_t)k_bench_tables[a][b->j];
+}
+
+void Bench_Step(Bench *b, BenchOut *o)
+{
+    o->ticks = 0; o->dither = 0; o->mask = b->mask; o->led = false; o->done = false;
+    switch (b->st) {
+    case BENCH_PRE:
+        b->k++;
+        if (b->k >= BENCH_PRE_FRAMES) {
+            b->st = BENCH_RUN;
+            b->k = 0u; b->iseg = 0u; b->j = 0u; b->base = 0; b->val = 0; b->crc = 0u;
+        }
+        break;
+    case BENCH_RUN: {
+        const BenchSeg *s = &b->p->seg[b->iseg];
+        b->val = clamp_ticks(seg_value(b, s));
+        o->ticks = b->val;
+        if ((s->flags & BSEG_F_DITHER) != 0u) {
+            o->dither = (((b->k / BENCH_DITHER_HALF) & 1u) == 0u) ? BENCH_DITHER_TICKS : -BENCH_DITHER_TICKS;
+        }
+        o->led = (((b->k / BENCH_LED_HALF) & 1u) == 0u);
+        const uint16_t w = (uint16_t)(int16_t)(o->ticks + o->dither);
+        const uint8_t le[2] = { (uint8_t)(w & 0xFFu), (uint8_t)(w >> 8) };
+        b->crc = crc32_ieee_update(b->crc, le, 2u);
+        b->k++;
+        b->j++;
+        if (b->j >= s->frames) { b->j = 0u; b->base = b->val; b->iseg++; }
+        if (b->iseg >= b->p->nseg) { b->st = BENCH_POST; b->k = 0u; o->done = true; }
+        break;
+    }
+    case BENCH_POST:
+        b->k++;
+        if (b->k >= BENCH_POST_FRAMES) { b->st = BENCH_IDLE; }
+        break;
+    case BENCH_HOLD:
+        o->ticks = b->val;
+        o->led = true;
+        break;
+    default:
+        break;
+    }
+}
+
+int32_t Bench_FinTicks(const BenchOut *o, uint32_t fin)
+{
+    if ((fin >= BENCH_FINS) || ((o->mask & (uint8_t)(1u << fin)) == 0u)) { return 0; }
+    return o->ticks + (((fin & 1u) != 0u) ? -o->dither : o->dither);
+}
+
+const BenchProfile *Bench_Find(const char *s)
+{
+    if ((s == NULL) || (s[0] == '\0')) { return NULL; }
+    for (uint32_t i = 0u; i < k_bench_nprofiles; i++) {
+        if (strcmp(s, k_bench_profiles[i].name) == 0) { return &k_bench_profiles[i]; }
+    }
+    uint32_t id = 0u;
+    for (const char *c = s; *c != '\0'; c++) {
+        if ((*c < '0') || (*c > '9') || (id > 999u)) { return NULL; }
+        id = (id * 10u) + (uint32_t)(*c - '0');
+    }
+    return (id < k_bench_nprofiles) ? &k_bench_profiles[id] : NULL;
+}
+
+int32_t Bench_MdegToTicks(int32_t mdeg)
+{
+    if (mdeg > 30000) { mdeg = 30000; }
+    if (mdeg < -30000) { mdeg = -30000; }
+    return div_round(mdeg * 16, 225);
+}
+
+#endif /* CFG_BENCH_PROFILE */

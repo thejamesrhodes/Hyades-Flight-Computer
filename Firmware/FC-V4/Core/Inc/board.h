@@ -71,8 +71,8 @@
  * -------------------------------------------------------------------------- */
 #define FRAME_HZ              200u
 #define MS_TO_FRAMES(ms)      ((uint32_t)((((uint32_t)(ms) * FRAME_HZ) + 999u) / 1000u))
-#define FRAME_PERIOD_US       (1000000u / FRAME_HZ)   /* 10 000 us            */
-#define FRAME_DT_S            (1.0f / (float)FRAME_HZ) /* exact 0.010 s        */
+#define FRAME_PERIOD_US       (1000000u / FRAME_HZ)   /* 5 000 us at 200 Hz   */
+#define FRAME_DT_S            (1.0f / (float)FRAME_HZ) /* 0.005 s at 200 Hz    */
 
 
 /* RUN-state settle: hold fins centred and control inactive for this long
@@ -94,11 +94,15 @@
 #define SERVO_MIN_US          900u
 #define SERVO_MAX_US          2100u
 #define SERVO_CENTRE_US       1520u    /* fin zero; all fin commands are about this */
-#define SERVO_RANGE_DEG       180.0f   /* full mechanical sweep over MIN..MAX   */
+#define SERVO_RANGE_DEG       135.0f   /* sweep over MIN..MAX at the maker's scale: the Blue Bird
+                                        * BMS-127WV+ turns 90 deg for 1100-1900 us, 8.889 us/deg.
+                                        * Bench check, 10 Nov 2026: at the old 180 (6.667 us/deg)
+                                        * the canard moved 0.75 of the command (BENCH-01, REVIEW-01
+                                        * F1). Travel outside 1100-1900 us is not on the data sheet. */
 #define FIN_DEFLECT_DEG       30.0f    /* +/- command authority about centre    */
 /* Servo timer tick (ALLOC-01). TIM2/TIM3 run from the 96 MHz APB1 timer clock;
- * PSC = clock / tick - 1. At 8 MHz one tick is 0.125 us = 0.019 deg at the
- * servo (6.667 us/deg), against 0.15 deg at the old 1 MHz tick. The fallback
+ * PSC = clock / tick - 1. At 8 MHz one tick is 0.125 us = 0.014 deg at the
+ * servo (8.889 us/deg), against 0.11 deg at the old 1 MHz tick. The fallback
  * period SERVO_PERIOD_US x ticks/us must fit TIM3's 16-bit ARR (48000). */
 #define PWM_TIM_CLK_HZ        96000000u
 #ifndef PWM_TICK_HZ
@@ -107,10 +111,13 @@
 #define PWM_TICKS_PER_US      (PWM_TICK_HZ / 1000000u)
 /* The per-fin mechanical zero is not a build constant: it is measured with
  * the canard alignment session ('cal' commands, CAL-01), stored in the flash
- * journal (calstore.c) and applied by PWM_SetZeroMdeg in whole ticks. A zero
- * may be up to +/-90 deg (any horn indexing); beyond +/-60 deg the servo end
- * stop would clip the +/-FIN_DEFLECT_DEG authority, so READY is held. */
-#define FIN_ZERO_FULL_AUTH_MDEG  60000      /* 90 - FIN_DEFLECT_DEG, checked in pwm.c */
+ * journal (calstore.c) and applied by PWM_SetZeroMdeg in whole ticks. The
+ * neutral sits 20 us above mid-range, so the travel from it is 580 us (65.25
+ * deg) one way and 620 us the other. A zero may be up to +/-65 deg
+ * (FINCAL_LIMIT_MDEG); beyond +/-35 deg the pulse limit would clip the
+ * +/-FIN_DEFLECT_DEG authority on one side, so READY is held. Both limits are
+ * checked against the pulse range in pwm.c. */
+#define FIN_ZERO_FULL_AUTH_MDEG  35000
 
 /* ----------------------------------------------------------------------------
  * 5. CONTROLLER  —  geometric SO(3) outer loop + INDI inner loop
@@ -190,7 +197,9 @@
 #define CTRL_TRIM_BAND_K       0.3f     /* MC-01 (was 1.1, sized for c = 70: at c = 15
                                          * the band would ignore ~45 dps at max q)   */
 #endif
-#define CTRL_TRIM_DEADBAND_RAD 0.00196f /* P.Servo.Deadband (n = 1)               */
+#define CTRL_TRIM_DEADBAND_RAD 0.00196f /* P.Servo.Deadband (n = 1): +/-1 us at 8.889 us/deg.
+                                         * BENCH-01: the servo takes a new target only after a
+                                         * 2.0 us change of its input, 0.0039 rad */
 #ifndef CTRL_TRIM_CLAMP   /* SITL sweeps override with -D */
 #define CTRL_TRIM_CLAMP        0.1047f  /* P.Trim.Clamp, +/-6 deg                  */
 #endif
@@ -215,7 +224,8 @@
 #define CTRL_DITHER_ON         1
 #endif
 #ifndef CTRL_DITHER_AMP_RAD
-#define CTRL_DITHER_AMP_RAD    (1.5f * CTRL_TRIM_DEADBAND_RAD)   /* 0.00294 rad, 0.17 deg */
+#define CTRL_DITHER_AMP_RAD    (1.5f * CTRL_TRIM_DEADBAND_RAD)   /* 0.00294 rad, 0.17 deg: +/-1.5 us,
+                                         * 3.0 us peak to peak against the measured 2.0 us threshold */
 #endif
 #ifndef CTRL_DITHER_PERIOD_N
 #define CTRL_DITHER_PERIOD_N   4u       /* 4 frames = 50 Hz at 200 Hz            */
@@ -341,6 +351,13 @@
  * ground tests). Must be 0 in flight builds. */
 #define CFG_FAULT_INJECTION   1
 
+/* Bench servo identification (BENCH-02, bench.c): the 'bench' console command
+ * plays stored command profiles to the canard servos in SETTLING/READY, with
+ * the board LEDs as a camera timing mark. Must be 0 in flight builds. */
+#ifndef CFG_BENCH_PROFILE
+#define CFG_BENCH_PROFILE     1
+#endif
+
 /* ----------------------------------------------------------------------------
  * 9. FLIGHT LOG (internal flash, flashlog.c) and USB firmware update
  *
@@ -399,7 +416,9 @@
 #define NAV_SITE_ELEV_M       110.0f
 #define NAV_SAT_MPS2          (15.5f * BOARD_G_MPS2)  /* = FDIR accel range bound */
 #define NAV_SAT_BUDGET_N      MS_TO_FRAMES(20u)       /* clipped frames tolerated (nav.h) */
-#define NAV_STILL_ACC_MPS2    0.5f    /* pad zeroing: | |f| - g | below this ...   */
+#define NAV_STILL_ACC_MPS2    0.5f    /* pad zeroing: |f| within this of its running mean ... */
+#define NAV_STILL_BAND_MPS2   2.5f    /* ... |f| within this of 9.80665 (0.25 g: the QMI8658A
+                                       * read 0.91 g on one axis, bench 13 Nov 2026) ...      */
 #define NAV_STILL_GYRO_RADPS  0.10f   /* ... and |w| below this (5.7 dps)          */
 #define NAV_ACC_PSD           0.01f   /* (m/s^2)^2/Hz: VRW is ~5e-7 (measured); this
                                        * covers scale/misalignment error in boost  */
@@ -468,8 +487,8 @@
 /* Flight-build guard: define CFG_FLIGHT_BUILD=1 (compiler -D) for a flight
  * image; the bench-only features must then be off or the build fails. */
 #if defined(CFG_FLIGHT_BUILD)
-#if (CFG_FLIGHT_BUILD != 0) && ((CFG_HITL != 0) || (CFG_FAULT_INJECTION != 0) || (CFG_BENCH_ACTUATE_READY != 0))
-#error "flight build with a bench feature enabled (CFG_HITL / CFG_FAULT_INJECTION / CFG_BENCH_ACTUATE_READY)"
+#if (CFG_FLIGHT_BUILD != 0) && ((CFG_HITL != 0) || (CFG_FAULT_INJECTION != 0) || (CFG_BENCH_ACTUATE_READY != 0) || (CFG_BENCH_PROFILE != 0))
+#error "flight build with a bench feature enabled (CFG_HITL / CFG_FAULT_INJECTION / CFG_BENCH_ACTUATE_READY / CFG_BENCH_PROFILE)"
 #endif
 #if (CFG_FLIGHT_BUILD != 0) && (CFG_REQUIRE_FIN_CAL == 0)
 #error "flight build must require a canard-zero calibration (CFG_REQUIRE_FIN_CAL 1)"

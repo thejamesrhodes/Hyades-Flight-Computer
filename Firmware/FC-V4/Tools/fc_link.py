@@ -31,7 +31,8 @@ COMMANDS = ("help", "ver", "stream on", "stream off", "faults", "tasks", "gps", 
             "log info", "log start", "log stop", "log erase", "log pull", "reboot",
             "faults clear", "gps raw", "gps probe", "imu capture",
             "inject wdg", "inject phase", "inject imu",
-            "cal", "cal begin", "cal jog ", "cal set ", "cal save", "cal cancel")
+            "cal", "cal begin", "cal jog ", "cal set ", "cal save", "cal cancel",
+            "bench", "bench run ", "bench hold ", "bench stop")
 FIN_NAMES = ("0 top", "1 right", "2 bottom", "3 left")
 VER_PREFIX = "Hyades FC-V4"
 

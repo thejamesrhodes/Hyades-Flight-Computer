@@ -15,10 +15,19 @@
  * integrate to ~0.1 m/s per mg-second.
  *
  * Pad behaviour (Nav_Step with on_pad): the state integrates every frame but
- * is zeroed whenever the sample looks stationary (| |f| - g_ref | and |w|
- * small). Liftoff is therefore integrated from its FIRST high-g sample, not
- * from the end of the detector's persistence window (50 ms at 20 g would be
- * a 10 m/s error).
+ * is zeroed whenever the sample looks stationary: |w| small, |f| plausibly
+ * 1 g (still_band_mps2 about 9.80665, wide enough for the sensor's zero-g
+ * offset and scale error) and |f| steady (within still_acc_mps2 of its own
+ * running mean). Liftoff is therefore integrated from its FIRST high-g
+ * sample, not from the end of the detector's persistence window (50 ms at
+ * 20 g would be a 10 m/s error).
+ *
+ * The steadiness test is against the running mean of |f|, not against g_ref
+ * or 9.80665: the accelerometer's offset differs by axis (bench, 13 Nov 2026:
+ * |f| = 1.00 g with the board level, 0.91 g rolled 87 deg), so a fixed
+ * reference failed after the airframe was turned and the pad state then
+ * integrated the offset (0.9 m/s^2) without limit. g_ref and the running mean
+ * follow a change of attitude within about 2 s and 0.5 s (at 200 Hz).
  *
  * Saturation: any accel axis at the sensor's range marks the velocity (and
  * so h, q_hat) unreliable until the next pad reset (NAV_F_SAT). The QMI8658A
@@ -57,7 +66,8 @@ typedef struct {
                             * first clipped frame flags, the pre-ADR-004 rule).
                             * Bound on the velocity error a budget can hide:
                             * n * dt * overshoot, 4 x 5 ms x 2 g = 0.4 m/s.  */
-    float still_acc_mps2;  /* | |f| - g_ref | below this = stationary candidate  */
+    float still_acc_mps2;  /* | |f| - running mean of |f| | below this = steady  */
+    float still_band_mps2; /* | |f| - 9.80665 | below this = plausibly 1 g       */
     float still_gyro_radps;/* |w| below this = stationary candidate             */
     float acc_psd;         /* white accel PSD for the vertical KF, (m/s^2)^2/Hz  */
     float gps_var_m2;      /* GPS altitude variance                             */
@@ -72,8 +82,9 @@ typedef struct {
     float    p[3], v[3];   /* ENU relative to the pad origin (m, m/s)           */
     float    P[4];         /* [h, v_up] covariance, row-major 2x2               */
     float    g_ref;        /* pad-measured gravity (m/s^2)                       */
-    float    g_sum;
-    uint32_t g_n;
+    uint32_t g_n;          /* samples in g_ref (capped: then a running mean)     */
+    float    f_mean;       /* running mean of |f| while plausibly 1 g (m/s^2)    */
+    uint32_t f_n;          /* samples in f_mean (capped)                         */
     float    gps_sum;      /* pad GPS altitude average -> h_site                */
     uint32_t gps_n;
     uint16_t gps_rej;      /* consecutive NIS rejections                        */

@@ -70,6 +70,7 @@ typedef struct {
     /* run */
     unsigned long long seed; double pad_hold, t_max, dt_asc, dt_desc;
     char motor[256], aero[256], trace[256];
+    int trace_dec;                 /* trace every this many frames (4 = 50 Hz; 1 for BENCH-02 replay profiles) */
     /* vehicle (ADR-004 assumption register) */
     double m_dry, x_cg_dry, x_mot, It_dry, Ixx_body, I_can, L_total, d;
     double x_canard, x_fin, x_nose_cp, x_attach, x_imu, r_imu;
@@ -88,6 +89,10 @@ typedef struct {
     double vib_boost_g, vib_res_g, vib_res_hz, vib_gyro_dps, vib_coast_g, vib_chute_g;
     /* servo (sim_params.json Servo, BMS-127WV+) */
     double sv_rate, sv_wn, sv_zeta, sv_tau, sv_db, sv_lash, sv_res, sv_travel, sv_volt_k, sv_extra;
+    /* BENCH-01 measured input stage (0 = legacy quantiser + error dead zone): the servo takes a new target only
+     * when the command has moved sv_sod from the last accepted one, and lands sv_land (1-sigma, frozen per
+     * target cell) away from it. sv_gain = true angle per commanded angle (pulse scale error). */
+    double sv_sod, sv_land, sv_gain;
     int    fault_fin; double fault_t; char fault_kind[16]; double fault_val;
     /* gps */
     int    gps_on; double gps_sd;
@@ -130,9 +135,11 @@ static void cfg_defaults(void)
     C.vib_boost_g = 1.5; C.vib_res_g = 1.0; C.vib_res_hz = 450; C.vib_gyro_dps = 3; C.vib_coast_g = 0.3; C.vib_chute_g = 0.05;
     C.sv_rate = 23.65; C.sv_wn = 80; C.sv_zeta = 0.7; C.sv_tau = 0.014; C.sv_db = 0.00196; C.sv_lash = 0.002;
     C.sv_res = 5.1e-4; C.sv_travel = 0.2094; C.sv_volt_k = 1.0; C.sv_extra = 1.9e-3;
+    C.sv_sod = 0.0; C.sv_land = 0.0; C.sv_gain = 1.0;
     C.fault_fin = -1; C.fault_t = 1e9; strcpy(C.fault_kind, "none");
     C.gps_on = 1; C.gps_sd = 4.0;
     C.fin_deg = (int)FIN_DEFLECT_DEG;
+    C.trace_dec = 4;
     C.pwm_quant = 1;
 }
 
@@ -151,8 +158,8 @@ static void cfg_set(const char *k, const char *v)
     D(wind) D(wind_dir) D(turb) D(gust_t) D(gust_amp) D(gust_dur) D(rail_len) D(rail_tilt) D(rail_az)
     D(ground_k) D(ground_c) D(collapse_t) D(chute_delay) D(canopy_swing) D(chute_cd_a) D(cord_len) D(arw) D(vrw) D(acc_bias) D(gyro_bias) D(sf) D(misal_deg) D(gsens)
     D(vib_boost_g) D(vib_res_g) D(vib_res_hz) D(vib_gyro_dps) D(vib_coast_g) D(vib_chute_g)
-    D(sv_rate) D(sv_wn) D(sv_zeta) D(sv_tau) D(sv_db) D(sv_lash) D(sv_res) D(sv_travel) D(sv_volt_k) D(sv_extra)
-    I(fault_fin) D(fault_t) D(fault_val) I(gps_on) D(gps_sd) I(shadow) I(fin_deg) D(force_deg) D(force_t) I(force_mode) I(pwm_quant)
+    D(sv_rate) D(sv_wn) D(sv_zeta) D(sv_tau) D(sv_db) D(sv_lash) D(sv_res) D(sv_travel) D(sv_volt_k) D(sv_extra) D(sv_sod) D(sv_land) D(sv_gain)
+    I(fault_fin) D(fault_t) D(fault_val) I(gps_on) D(gps_sd) I(shadow) I(fin_deg) D(force_deg) D(force_t) I(force_mode) I(pwm_quant) I(trace_dec)
     fprintf(stderr, "unknown key %s\n", k); exit(2);
 #undef D
 #undef I
@@ -228,6 +235,7 @@ static Q4 qint(Q4 q, V3 w, double dt)   /* q <- q (x) exp(w dt / 2) */
 /* ---------------------------------------------------------------- servo -- */
 typedef struct {
     double th, thd, lash, cmd_now, buf[256]; int nd, w; double t_next_cmd, cmd_pending;
+    double acc_cmd, acc_tgt; int id;   /* send-on-delta: last accepted command and the target it produced */
     int fault; /* 0 none 1 stuck 2 hardover 3 slow 4 float 5 offset */
 } Servo;
 static void servo_init(Servo *s, double dt)
@@ -240,7 +248,21 @@ static double servo_step(Servo *s, double cmd, double dt)
     if (s->fault == 1) { return s->lash; }                       /* stuck at the current angle */
     if (s->fault == 2) { cmd = C.sv_travel * ((C.fault_val >= 0) ? 1.0 : -1.0); }
     if (s->fault == 5) { cmd += C.fault_val * D2R; }
-    const double u = round(cmd / C.sv_res) * C.sv_res;
+    double u;
+    if (C.sv_sod > 0.0) {
+        if (fabs(cmd - s->acc_cmd) >= (C.sv_sod - 1e-12)) {
+            s->acc_cmd = cmd;
+            /* landing error: uniform, sd sv_land, a fixed function of (servo, target cell of sv_sod/2) */
+            const long long cell = llround(cmd / (0.5 * C.sv_sod));
+            unsigned long long h = (unsigned long long)(cell + 1000003LL) * 0x9E3779B97F4A7C15ULL + (unsigned long long)(s->id + 1) * 0xBF58476D1CE4E5B9ULL + C.seed * 0x94D049BB133111EBULL;
+            h ^= h >> 31; h *= 0xD6E8FEB86659FD93ULL; h ^= h >> 29; h *= 0xD6E8FEB86659FD93ULL; h ^= h >> 32;
+            const double r = ((double)(h >> 11) / 9007199254740992.0) - 0.5;      /* [-0.5, 0.5) */
+            s->acc_tgt = (cmd * C.sv_gain) + (C.sv_land * 3.4641016151377544 * r);
+        }
+        u = s->acc_tgt;
+    } else {
+        u = round((cmd * C.sv_gain) / C.sv_res) * C.sv_res;
+    }
     s->buf[s->w] = u; const double cd = s->buf[(s->w - s->nd + 256) % 256]; s->w = (s->w + 1) % 256;
     const double e = cd - s->th;
     const double edz = (fabs(e) <= C.sv_db) ? 0.0 : (e - copysign(C.sv_db, e));
@@ -728,11 +750,11 @@ int main(int argc, char **argv)
         P.q.w = cos(tl / 2); P.q.x = ax.x * sin(tl / 2); P.q.y = ax.y * sin(tl / 2); P.q.z = 0;
     }
     imu_init();
-    for (int i = 0; i < 4; i++) { servo_init(&P.sv[i], C.dt_asc); }
+    for (int i = 0; i < 4; i++) { servo_init(&P.sv[i], C.dt_asc); P.sv[i].id = i; }
     mass_props(); loads_init();
 
     static const NavCfg NC = {
-        .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .sat_budget_n = NAV_SAT_BUDGET_N, .still_acc_mps2 = NAV_STILL_ACC_MPS2,
+        .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .sat_budget_n = NAV_SAT_BUDGET_N, .still_acc_mps2 = NAV_STILL_ACC_MPS2, .still_band_mps2 = NAV_STILL_BAND_MPS2,
         .still_gyro_radps = NAV_STILL_GYRO_RADPS, .acc_psd = NAV_ACC_PSD, .gps_var_m2 = NAV_GPS_VAR_M2,
         .gps_nis_max = NAV_GPS_NIS_MAX, .gps_rej_reset = NAV_GPS_REJ_RESET, .gps_v_var = NAV_GPS_V_VAR,
         .q_speed_min = NAV_Q_SPEED_MIN };
@@ -751,7 +773,7 @@ int main(int argc, char **argv)
     if (C.trace[0]) {
         tr = fopen(C.trace, "w");
         fprintf(tr, "t,phase,h,vz,qbar,mach,alpha_deg,p_dps,q_dps,r_dps,pcan_dps,delta0,delta1,delta2,delta3,"
-                    "fin0,h_est,vz_est,qbar_est,fx,fy,fz,trim,ax_imu,ay_imu,az_imu\n");
+                    "fin0,h_est,vz_est,qbar_est,fx,fy,fz,trim,ax_imu,ay_imu,az_imu,roll_cmd\n");
     }
     /* boot: 1 s gyro calibration + accel seed on the pad (as app.c boot()) */
     const double frame_dt = 1.0 / FRAME_HZ;
@@ -883,13 +905,13 @@ int main(int argc, char **argv)
                 }
                 trim_last = F.ctrl.trim;
             }
-            if (tr && ((frames % 4) == 0)) {
-                fprintf(tr, "%.4f,%u,%.2f,%.2f,%.0f,%.3f,%.3f,%.2f,%.2f,%.2f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.0f,%.2f,%.2f,%.2f,%.4f,%.2f,%.2f,%.2f\n",
+            if (tr && ((frames % ((C.trace_dec > 0) ? C.trace_dec : 4)) == 0)) {
+                fprintf(tr, "%.4f,%u,%.2f,%.2f,%.0f,%.3f,%.3f,%.2f,%.2f,%.2f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.0f,%.2f,%.2f,%.2f,%.4f,%.2f,%.2f,%.2f,%.6f\n",
                         P.ignited ? P.t - P.t_ign : -(P.t), Phase_Index(ph), P.p.z, P.v.z, P.qbar, P.mach, P.alpha * R2D,
                         P.w.z * R2D, P.w.x * R2D, P.w.y * R2D, P.pc * R2D,
                         P.delta[0] * R2D, P.delta[1] * R2D, P.delta[2] * R2D, P.delta[3] * R2D, F.fin[0],
                         Nav_Height(&F.nav), Nav_VUp(&F.nav), F.nav.qbar, P.f_spec.x, P.f_spec.y, P.f_spec.z, F.ctrl.trim,
-                        IM.out_a[0], IM.out_a[1], IM.out_a[2]);
+                        IM.out_a[0], IM.out_a[1], IM.out_a[2], (double)F.alloc.v[0]);
             }
             if ((ph == PH_LANDED) && P.landed && (P.t - P.t_rest > 1.0)) { break; }
             if (P.ignited && (P.t - P.t_ign > C.t_max)) { break; }

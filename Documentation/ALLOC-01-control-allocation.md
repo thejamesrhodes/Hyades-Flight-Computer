@@ -24,9 +24,9 @@ Figures: `Images/alloc01/alloc01_mechanism.png` and `alloc01_results.png`. Both 
 
 | Quantity | Value | Source |
 |---|---|---|
-| Servo scale | 6.667 µs/deg (1200 µs over 180°) | `board.h` |
-| One tick at 1 MHz (old) | 1 µs = 0.15° = 2.6 mrad | — |
-| One tick at 8 MHz (new) | 0.125 µs = 0.019° | — |
+| Servo scale | 8.889 µs/deg (1200 µs over 135°, the maker's figure) since 10 Nov. This study ran at the earlier 6.667 µs/deg (REVIEW-01 F1) | `board.h` |
+| One tick at 1 MHz (old) | 1 µs = 0.11° (0.15° = 2.6 mrad as studied) | — |
+| One tick at 8 MHz (new) | 0.125 µs = 0.014° (0.019° as studied) | — |
 | Servo dead band | 1.96 mrad nominal (0.11°). MC samples 1–4 mrad. | `sim_params.json`, assumed, **not measured** |
 | Servo internal resolution | 0.51 mrad (0.029°) | `sim_params.json`, assumed |
 | Roll moment per canard per 1 MHz tick | q̄ × 8.0e-8 N·m/Pa. That is 0.5 mN·m at 6 kPa. | `kf_can` 7.88e-4 m²/rad, CP 0.039 m |
@@ -51,7 +51,7 @@ The allocator runs in `Flight_Step` after `Ctrl_Update` and before the shadow an
    - Each fin is rounded to a whole tick, while the sum of the four is kept to the nearest tick.
    - Extra ticks go to an opposite pair first (pure roll). The odd tick alternates between the fins of a pair frame by frame, so its pitch moment averages to zero (figure panel b).
    - This gives 4× finer roll resolution at a cost of at most one tick (0.005° RMS in SITL) of pitch or yaw difference.
-   - At 8 MHz it is redundant, because the tick (0.019°) is already finer than the servo's own resolution (0.029°).
+   - At 8 MHz it is redundant, because the tick (0.014°) is already finer than the servo's own resolution (0.029°).
 5. **Per-fin zero offsets.** These are applied in `PWM_SetFin` and `PWM_CentreFins` in whole ticks, so they never disturb the quantisation. Since CAL-01 they are measured with the `cal` alignment commands and stored in a flash journal, not set in `board.h`.
    - They correct servo spline indexing and linkage error.
    - PLAN-01 G4 measures them with the CAL-01 procedure.
@@ -160,3 +160,5 @@ At 5–9 kPa the residual roll is set by bearing friction and gusts, not by a to
    - all four pulses starting together.
 2. Align each canard against a jig with the CAL-01 procedure and save.
 3. Measure the servo dead band and resolution with a slow ramp, as in BP-01. If the dead band is below 0.15°, re-run variant E1.
+   - **Done 10 Nov (BENCH-01 rev 2, REVIEW-01 §3).** The servo takes a new target only after a 2.0 µs command change: 16 ticks at 8 MHz, 0.225° at the canard (0.30° in the commanded units of the time). That is above 0.15°, so E1 needs no re-run. With this input stage in the SITL (`mc.py --servo bench01`) the adopted configuration is unchanged (96.7 %), and removing the dither costs +5.9 °/s of coast RMS, against +3.8 with the legacy model.
+   - **Scale corrected 10 Nov (REVIEW-01 rev 2).** The firmware now commands 8.889 µs/°. The adopted configuration re-run at that scale is unchanged (96.7 %, coast RMS 15.2 / 32.3 °/s, peak p95 201 °/s), so the conclusions of this study stand.

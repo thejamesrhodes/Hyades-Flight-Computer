@@ -30,10 +30,14 @@ void PWM_SetPulse(PWM_Channel ch, uint32_t pulse_us);   /* clamped MIN..MAX    *
 /* Fin command: idx 0..3, norm in [-1,+1] -> centre +/- FIN_DEFLECT_DEG. */
 void PWM_SetFin(uint8_t fin_idx, float norm);
 
+/* Bench only (BENCH-02): fin command in whole timer ticks about the fin's zero,
+ * clamped to the command authority. Same output path as PWM_SetFin. */
+void PWM_SetFinTicks(uint8_t fin_idx, int32_t ticks);
+
 /* Centre all fins (failsafe / inactive). */
 void PWM_CentreFins(void);
 /* Per-fin mechanical zero, millidegrees at the servo (CAL-01). Clamped to
- * +/-FINCAL_LIMIT_MDEG (90 deg). Applies from the next PWM_SetFin / PWM_CentreFins. */
+ * +/-FINCAL_LIMIT_MDEG (65 deg). Applies from the next PWM_SetFin / PWM_CentreFins. */
 void PWM_SetZeroMdeg(const int32_t mdeg[FIN_COUNT]);
 
 /* Start the next pulse on all channels now (frame-synchronous servo update). */

@@ -295,13 +295,13 @@ class CanardAlignment(unittest.TestCase):
         self.assertEqual(self.dev.phase, "ALIGN")
         self.assertEqual(self.ask("cal jog 0 +0.10")["trial"][0], 0.1)
         self.assertEqual(self.ask("cal jog 0 +10.5")["trial"][0], 0.1)      # over the 10 deg step: refused
-        self.assertEqual(self.ask("cal set 3 -90.5")["trial"][3], 0.0)      # over 90 deg: refused
-        self.assertEqual(self.ask("cal set 2 -45")["trial"][2], -45.0)      # any horn indexing
+        self.assertEqual(self.ask("cal set 3 -65.5")["trial"][3], 0.0)      # over 65 deg: refused
+        self.assertEqual(self.ask("cal set 2 -30")["trial"][2], -30.0)      # any horn indexing
         self.assertTrue(str(self.ask("cal jog 4 0.1")).startswith("usage"))
         time.sleep(1.5)
         self.assertEqual(self.dev.phase, "ALIGN")                           # no timeout, never READY
         c = self.ask("cal save")
-        self.assertEqual((c["state"], c["stored"], c["seq"], c["zero"][2], c["auth"]), ("IDLE", "OK", 1, -45.0, "full"))
+        self.assertEqual((c["state"], c["stored"], c["seq"], c["zero"][2], c["auth"]), ("IDLE", "OK", 1, -30.0, "full"))
         self.assertEqual(self.dev.phase, "SETTLE")
         time.sleep(1.5)
         self.assertEqual(self.dev.phase, "READY")
@@ -318,11 +318,46 @@ class CanardAlignment(unittest.TestCase):
         time.sleep(1.5)
         self.assertEqual(self.dev.phase, "READY")
         self.ask("cal begin")
-        self.ask("cal set 1 75")
+        self.ask("cal set 1 50")
         c = self.ask("cal save")
         self.assertEqual((c["auth"], c["ready"]), ("clipped", "held"))
         time.sleep(1.5)
         self.assertEqual(self.dev.phase, "SETTLE")                          # held: authority clipped
+
+class BenchProfiles(unittest.TestCase):
+    """BENCH-02: the firmware profile table is the one profiles.py generates, and its timing rules hold."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Tools", "bench", "servo_id"))
+        import profiles
+        cls.P = profiles
+
+    def test_table_in_firmware_is_current(self):
+        src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Core", "hyades", "svc", "bench_profiles.c")
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "bench_profiles.c")
+            self.P.emit(out)
+            with open(out) as a, open(src) as b:
+                self.assertEqual(a.read(), b.read(), "run: python Tools/bench/servo_id/profiles.py --emit")
+
+    def test_lengths_identify_and_led_ends_lit(self):
+        halves = [p["halves"] for p in self.P.PROFILES]
+        self.assertEqual(len(set(halves)), len(halves))
+        for p in self.P.PROFILES:
+            self.assertEqual(p["frames"], p["halves"] * self.P.LED_HALF)
+            self.assertEqual(p["halves"] % 2, 1)                     # lit for the first and the last half period
+
+    def test_commands_within_authority_and_end_at_zero(self):
+        for p in self.P.PROFILES:
+            seq = self.P.play(p["segs"])
+            self.assertEqual(len(seq), p["frames"])
+            self.assertLessEqual(max(abs(v) for v, _ in seq), self.P.TICKS_MAX)
+            self.assertEqual(seq[-1][0], 0)
+            if p["name"] != "sync":                                  # the header the analysis relies on
+                deg = [v / self.P.TICKS_PER_DEG for v, _ in seq[:360]]
+                self.assertEqual([round(deg[i]) for i in (50, 140, 220, 320)], [0, 10, -10, 0])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

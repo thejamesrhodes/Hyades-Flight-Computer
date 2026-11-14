@@ -44,13 +44,26 @@ void FinCal_Pack(uint8_t out[FINCAL_REC_SIZE], uint16_t seq, const int32_t off_m
 bool FinCal_Unpack(const uint8_t in[FINCAL_REC_SIZE], FinCal *out)
 {
     out->valid = false;
+    out->version = 0u;
+    const uint8_t ver = in[OFF_VER];
     if (get_u32(&in[OFF_MAGIC]) != FINCAL_MAGIC) { return false; }
-    if ((in[OFF_VER] != (uint8_t)FINCAL_VERSION) || (in[OFF_COUNT] != (uint8_t)FINCAL_FINS)) { return false; }
+    if ((ver != (uint8_t)FINCAL_VERSION) && (ver != (uint8_t)FINCAL_VERSION_OLD)) { return false; }
+    if (in[OFF_COUNT] != (uint8_t)FINCAL_FINS) { return false; }
     if (get_u32(&in[OFF_CRC]) != crc32_ieee(in, OFF_CRC)) { return false; }
     int32_t off[FINCAL_FINS];
     for (uint32_t i = 0u; i < FINCAL_FINS; i++) { off[i] = (int32_t)get_u32(&in[OFF_FINS + (4u * i)]); }
+    if (ver == (uint8_t)FINCAL_VERSION_OLD) {
+        /* Old-scale degrees x 6.667 / 8.889 = x 3/4: the pulse, and so the canard
+         * position found at alignment, is unchanged. Range-checked before the
+         * multiply (|x| <= 90 000, x 3 fits int32), rounded to nearest. */
+        if (!FinCal_Within(off, FINCAL_LIMIT_OLD_MDEG)) { return false; }
+        for (uint32_t i = 0u; i < FINCAL_FINS; i++) {
+            off[i] = (off[i] >= 0) ? (((off[i] * 3) + 2) / 4) : -((((-off[i]) * 3) + 2) / 4);
+        }
+    }
     if (!FinCal_InRange(off)) { return false; }
     out->seq = get_u16(&in[OFF_SEQ]);
+    out->version = ver;
     for (uint32_t i = 0u; i < FINCAL_FINS; i++) { out->off_mdeg[i] = off[i]; }
     out->valid = true;
     return true;

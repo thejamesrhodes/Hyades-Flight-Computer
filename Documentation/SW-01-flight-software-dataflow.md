@@ -44,11 +44,11 @@
    - null-space dither (±1.5 × dead band at 50 Hz, top/bottom against left/right), so the canards add no net moment from it;
    - roll-priority saturation.
 
-   `PWM_SetFin` then quantises each command to the 8 MHz PWM tick (0.019° per tick).
+   `PWM_SetFin` then quantises each command to the 8 MHz PWM tick (0.014° per tick).
 6. **Shadow build:** fins are held at 0 while the commands are still computed and logged.
 
 ## 3. Outputs
 
-- **Servos:** `PWM_SetFin` adds each fin's calibrated zero (CAL-01: stored in the flash journal, set with the `cal` commands in the ALIGN phase, up to ±90°) in whole ticks. `PWM_Commit` latches all four channels on one timer update, so there is no skew between canards.
+- **Servos:** `PWM_SetFin` adds each fin's calibrated zero (CAL-01: stored in the flash journal, set with the `cal` commands in the ALIGN phase, up to ±65°) in whole ticks. `PWM_Commit` latches all four channels on one timer update, so there is no skew between canards.
 - **Events:** each `emit()` produces an EVENT log record and console text.
 - **LogQ:** the pre-trigger ring (256 records) is armed in READY and committed at BOOST. The log closes at LANDED + 60 s (see ADR-004).

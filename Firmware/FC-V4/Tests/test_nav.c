@@ -9,7 +9,7 @@ static const float W0[3]   = { 0.0f, 0.0f, 0.0f };
 
 static NavCfg cfg(void)
 {
-    NavCfg c = { .h_site_m = 100.0f, .sat_mps2 = 15.5f * 9.80665f, .still_acc_mps2 = 0.5f,
+    NavCfg c = { .h_site_m = 100.0f, .sat_mps2 = 15.5f * 9.80665f, .still_acc_mps2 = 0.5f, .still_band_mps2 = 2.5f,
                  .still_gyro_radps = 0.1f, .acc_psd = 0.01f, .gps_var_m2 = 25.0f,
                  .gps_nis_max = 9.0f, .gps_rej_reset = 3u, .gps_v_var = 100.0f,
                  .q_speed_min = 1.0f };
@@ -33,6 +33,67 @@ static void test_pad_measures_gravity_and_holds_zero(void)
     TEST_ASSERT_EQUAL_FLOAT(0.0f, Nav_VUp(&N));
     TEST_ASSERT_TRUE((N.flags & NAV_F_INIT) != 0u);
     TEST_ASSERT_TRUE(Nav_QValid(&N));
+}
+
+/* Bench, 13 Nov 2026: the accelerometer read 0.91 g with the board on its side
+ * (per-axis offset). The pad must still be judged stationary and hold zero. */
+static void test_pad_holds_zero_with_accel_offset(void)
+{
+    pad(0.91f * 9.80665f, 400u);
+    TEST_ASSERT_TRUE((N.flags & NAV_F_INIT) != 0u);
+    TEST_ASSERT_TRUE((N.flags & NAV_F_STILL) != 0u);
+    TEST_ASSERT_FLOAT_WITHIN(1e-3f, 0.91f * 9.80665f, N.g_ref);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, Nav_Height(&N));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, Nav_VUp(&N));
+}
+
+/* Initialised in one attitude (1.00 g), then turned to one where the sensor
+ * reads 0.91 g: the old fixed reference never judged the pad stationary again
+ * and the height ran away at 0.9 m/s^2. Now the pad is stationary again within
+ * a second, the reference follows, and the state is held at zero. */
+static void test_pad_relearns_after_a_turn(void)
+{
+    pad(9.80665f, 5000u);
+    pad(0.91f * 9.80665f, 200u);                          /* 2 s after the turn */
+    TEST_ASSERT_TRUE((N.flags & NAV_F_STILL) != 0u);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, Nav_Height(&N));
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, Nav_VUp(&N));
+    pad(0.91f * 9.80665f, 2000u);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.91f * 9.80665f, N.g_ref);
+    /* and a liftoff from here integrates against the new reference */
+    const float f[3] = { 0.0f, 0.0f, (0.91f * 9.80665f) + 50.0f };
+    for (uint32_t i = 0u; i < 100u; i++) { Nav_Step(&N, Q_UP, f, W0, DT, true); }
+    TEST_ASSERT_FLOAT_WITHIN(0.02f, 50.0f, Nav_VUp(&N));
+}
+
+/* A steady acceleration inside the 1 g band is not 'stationary' just because
+ * it is steady for a moment: a step of 1 m/s^2 is integrated until the running
+ * mean has caught up (0.5 s), never zeroed at once. Outside the band nothing
+ * is ever zeroed. */
+static void test_step_inside_band_is_integrated_first(void)
+{
+    pad(9.81f, 200u);
+    const float f[3] = { 0.0f, 0.0f, 9.81f + 1.0f };
+    Nav_Step(&N, Q_UP, f, W0, DT, true);
+    TEST_ASSERT_TRUE((N.flags & NAV_F_STILL) == 0u);
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 0.01f, Nav_VUp(&N));
+    const float hi[3] = { 0.0f, 0.0f, 9.81f + 3.0f };     /* 0.31 g above: outside the band */
+    for (uint32_t i = 0u; i < 1000u; i++) { Nav_Step(&N, Q_UP, hi, W0, DT, true); }
+    TEST_ASSERT_TRUE((N.flags & NAV_F_STILL) == 0u);
+    TEST_ASSERT_TRUE(Nav_VUp(&N) > 29.0f);
+}
+
+/* A shock on the pad (outside the band) does not move the steadiness
+ * reference: the very next quiet sample is stationary again. */
+static void test_shock_does_not_move_the_reference(void)
+{
+    pad(9.81f, 200u);
+    const float f[3] = { 0.0f, 0.0f, 80.0f };
+    for (uint32_t i = 0u; i < 20u; i++) { Nav_Step(&N, Q_UP, f, W0, DT, true); }
+    TEST_ASSERT_TRUE(Nav_VUp(&N) > 10.0f);
+    pad(9.81f, 1u);
+    TEST_ASSERT_TRUE((N.flags & NAV_F_STILL) != 0u);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, Nav_VUp(&N));
 }
 
 /* Constant 50 m/s^2 net up for 2 s: v = 100 m/s, h = 100 m (trapezoid exact). */
@@ -149,6 +210,10 @@ int main(void)
 {
     UNITY_BEGIN();
     RUN_TEST(test_pad_measures_gravity_and_holds_zero);
+    RUN_TEST(test_pad_holds_zero_with_accel_offset);
+    RUN_TEST(test_pad_relearns_after_a_turn);
+    RUN_TEST(test_step_inside_band_is_integrated_first);
+    RUN_TEST(test_shock_does_not_move_the_reference);
     RUN_TEST(test_vertical_boost_integrates_exactly);
     RUN_TEST(test_liftoff_integrated_from_first_sample);
     RUN_TEST(test_attitude_rotates_specific_force);

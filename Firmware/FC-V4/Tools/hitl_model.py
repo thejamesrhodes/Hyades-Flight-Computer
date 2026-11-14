@@ -95,11 +95,23 @@ def roll_coeffs(P: dict, mach: float) -> tuple[float, float]:
     return Cl_delta, Cl_p
 
 
-class Servo:
-    """Port of canard_servo_reduced.m, one call per P.Servo.dt."""
+# BENCH-01 (10 Nov 2026) measured servo, as overrides of P.Servo (SimCfg.servo), in true canard angle at
+# 8.889 us/deg: a new target only after a 2.0 us command change (Sod, 0.225 deg), a repeatable landing
+# error per target (Land, 1-sigma 0.16 deg), no separate error dead zone, 130 rad/s, zeta 0.8, lash 0.135 deg.
+# Unloaded, one servo. The same input stage as sv_sod / sv_land in Tools/sitl/sitl.c.
+SERVO_BENCH01 = {"Sod": 0.0039, "Land": 0.0028, "Deadband": 0.0, "f_N": 130.0, "Zeta": 0.8, "Lash": 0.0024}
 
-    def __init__(self, P: dict) -> None:
+
+class Servo:
+    """Port of canard_servo_reduced.m, one call per P.Servo.dt. With P.Servo.Sod > 0 the 12-bit command
+    quantiser is replaced by the measured input stage (BENCH-01): send-on-delta plus a landing error."""
+
+    def __init__(self, P: dict, idx: int = 0) -> None:
         S, self.n = P["Servo"], float(P["Linkage"]["n"])
+        self.sod = float(S.get("Sod", 0.0)) / self.n
+        self.land = float(S.get("Land", 0.0)) / self.n
+        self.idx = idx
+        self.acc_cmd = self.acc_tgt = 0.0
         self.dt = S["dt"]
         self.q_cmd = S["Res"] / self.n
         self.nd = max(int(round(S["Tau_d"] / self.dt)), 1)
@@ -112,8 +124,23 @@ class Servo:
         self.b = 0.5 * S["Lash"] / self.n
         self.th = self.thd = self.lash = 0.0
 
+    def _landing(self, cmd: float) -> float:
+        """Uniform landing error, sd self.land, a fixed function of (servo, target cell of sod / 2)."""
+        m = 0xFFFFFFFFFFFFFFFF
+        h = ((round(cmd / (0.5 * self.sod)) + 1000003) * 0x9E3779B97F4A7C15 + (self.idx + 1) * 0xBF58476D1CE4E5B9) & m
+        h ^= h >> 31
+        h = (h * 0xD6E8FEB86659FD93) & m
+        h ^= h >> 29
+        return self.land * 3.4641016151377544 * (((h >> 11) / 9007199254740992.0) - 0.5)
+
     def step(self, cmd: float) -> float:
-        u = round(cmd / self.q_cmd) * self.q_cmd
+        if self.sod > 0.0:
+            if abs(cmd - self.acc_cmd) >= self.sod - 1e-12:
+                self.acc_cmd = cmd
+                self.acc_tgt = cmd + self._landing(cmd)
+            u = self.acc_tgt
+        else:
+            u = round(cmd / self.q_cmd) * self.q_cmd
         self.buf[self.w] = u
         cmd_d = self.buf[(self.w - self.nd) % len(self.buf)]
         self.w = (self.w + 1) % len(self.buf)
@@ -422,7 +449,7 @@ class SimCfg:
     clp_scale: float = 1.0        # roll damping error
     ixx_scale: float = 1.0
     thrust_scale: float = 1.0     # motor-to-motor impulse variation
-    servo: dict = field(default_factory=dict)   # overrides of P.Servo (f_N, Zeta, Tau_d, Deadband, Lash)
+    servo: dict = field(default_factory=dict)   # overrides of P.Servo (f_N, Zeta, Tau_d, Deadband, Lash, Sod, Land)
     gust: tuple | None = None     # (t_start s, duration s, peak m/s, from-direction deg): 1-cosine gust
     pad_knocks: tuple = ()        # ((t_pad s, peak g, duration s, axis 0..2), ...) handling on the pad
     pad_sway_deg: float = 0.0     # rail/airframe sway amplitude on the pad (0.7 Hz)
@@ -443,7 +470,7 @@ class Vehicle:
             self.P = P
         self.imu = Imu(imu or ImuCfg(), self.rng, cfg.vib)
         self.gps = Gps(gps or GpsCfg(), cfg.site_elev, self.rng)
-        self.servos = [Servo(self.P) for _ in range(4)]
+        self.servos = [Servo(self.P, i) for i in range(4)]
         self.t = 0.0                 # time since ignition (negative = pad hold)
         self.ignited = False
         self.p = np.zeros(3)

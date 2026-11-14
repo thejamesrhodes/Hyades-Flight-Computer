@@ -21,7 +21,7 @@ static void on_ev(void *ctx, EventCode c, uint32_t a, const char *t)
 }
 
 static const NavCfg NC = {
-    .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .sat_budget_n = NAV_SAT_BUDGET_N, .still_acc_mps2 = NAV_STILL_ACC_MPS2,
+    .h_site_m = NAV_SITE_ELEV_M, .sat_mps2 = NAV_SAT_MPS2, .sat_budget_n = NAV_SAT_BUDGET_N, .still_acc_mps2 = NAV_STILL_ACC_MPS2, .still_band_mps2 = NAV_STILL_BAND_MPS2,
     .still_gyro_radps = NAV_STILL_GYRO_RADPS, .acc_psd = NAV_ACC_PSD, .gps_var_m2 = NAV_GPS_VAR_M2,
     .gps_nis_max = NAV_GPS_NIS_MAX, .gps_rej_reset = NAV_GPS_REJ_RESET, .gps_v_var = NAV_GPS_V_VAR,
     .q_speed_min = NAV_Q_SPEED_MIN,
@@ -155,6 +155,24 @@ static void test_corrupt_word_in_flight_goes_cato_then_lands(void)
     TEST_ASSERT_EQUAL(PH_LANDED, Flight_Phase(&F));
 }
 
+/* a second upset, in CATO_SAFE, stays in CATO_SAFE (LOCKOUT is terminal and
+ * would lose the LANDED detection) */
+static void test_corrupt_word_in_cato_stays_cato_then_lands(void)
+{
+    boot_to_ready(); fly_to_descent();
+    F.ph.inv = 0u;
+    step(BOARD_G_MPS2, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(PH_CATO_SAFE, Flight_Phase(&F));
+    canopy(2.0f);
+    F.ph.v ^= 0x10u;                                 /* second corruption */
+    step(BOARD_G_MPS2, 0.0f, 0.0f);
+    TEST_ASSERT_EQUAL(PH_CATO_SAFE, Flight_Phase(&F));
+    canopy(20.0f);
+    for (uint32_t i = 0u; i < MS_TO_FRAMES(60u); i++) { step(9.0f * BOARD_G_MPS2, 0.0f, 0.0f); }
+    for (uint32_t k = 0u; (k < 15u * FRAME_HZ) && (Flight_Phase(&F) != PH_LANDED); k++) { step(BOARD_G_MPS2, 0.0f, 0.0f); }
+    TEST_ASSERT_EQUAL(PH_LANDED, Flight_Phase(&F));
+}
+
 static void test_liftoff_from_settling_is_sequenced(void)
 {
     Flight_Init(&F, &NC, &DC, MS_TO_FRAMES(60000u), NAV_BRIDGE_N, false, on_ev, NULL);   /* READY never reached */
@@ -199,6 +217,7 @@ int main(void)
     RUN_TEST(test_landing_without_shock_or_gps_within_32s);
     RUN_TEST(test_shadow_mode_holds_canards);
     RUN_TEST(test_corrupt_word_in_flight_goes_cato_then_lands);
+    RUN_TEST(test_corrupt_word_in_cato_stays_cato_then_lands);
     RUN_TEST(test_liftoff_from_settling_is_sequenced);
     RUN_TEST(test_align_holds_and_liftoff_sequenced);
     return UNITY_END();

@@ -1,3 +1,6 @@
+# SUPERSEDED by reanalysis/ (BENCH-01 rev 2). Known defect, kept for the record: setup B's levels at -20 and
+# -10 deg sit in a mechanically restricted zone, so a calibration through them stretches every B angle above
+# -20 deg by up to 2.2x (7.1 px/deg against 15.7). Do not reuse B numbers from this script.
 import json, numpy as np
 from scipy.optimize import least_squares
 from tracklib import load

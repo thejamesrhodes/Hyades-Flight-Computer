@@ -114,7 +114,7 @@ void IMU_CalibrateGyro(GyroCal *gc)
             sg[0] += g[0]; sg[1] += g[1]; sg[2] += g[2];
             n++;
         }
-        HAL_Delay(5);                         /* > 1/224 Hz -> new sample each time */
+        HAL_Delay(5);                         /* > 1/448 Hz -> new sample each time */
     }
     if (n > 0u) {
         gc->bias[0] = sg[0]/(float)n; gc->bias[1] = sg[1]/(float)n; gc->bias[2] = sg[2]/(float)n;

@@ -2,7 +2,7 @@
 
 **Status:** implemented and HITL-verified, 7 November 2026. **Applies to:** FC-V4 now, H743 unchanged.
 **Code:** `Core/hyades/gnc/nav.c/h`, `Core/hyades/mission/detect.c/h`, wiring in `Core/Src/app.c`, constants in `board.h` §10.
-**Tests:** `Tests/test_nav.c` (10), `Tests/test_detect.c` (5); HITL runs in HITL-01.
+**Tests:** `Tests/test_nav.c` (15), `Tests/test_detect.c` (5); HITL runs in HITL-01.
 
 **Decisions (James, 7 Nov):**
 - Scope: strapdown velocity/height, q̂, phase detectors, plus GPS aiding.
@@ -23,10 +23,15 @@ A loosely coupled block, kept separate from the IEKF. Nothing aids velocity in f
    where:
    - \(R\) is the body-to-ENU rotation from the IEKF;
    - \(f^b\) is the measured specific force (m/s²);
-   - \(g_\text{ref}\) is the gravity magnitude **measured on the pad**: the mean up-component of \(Rf\) while stationary. This cancels the vertical accel bias and the scale error at 1 g.
-2. **Pad.** In SETTLING and READY the state integrates every frame but is zeroed whenever the sample is stationary:
-   - | |f| − g_ref | < 0.5 m/s² and |ω| < 0.1 rad/s;
-   - liftoff is therefore integrated from its first high-g sample.
+   - \(g_\text{ref}\) is the gravity magnitude **measured on the pad**: the mean up-component of \(Rf\) while stationary (exact mean of the first 400 samples, then a running mean with a 2 s time constant). This cancels the vertical accel bias and the scale error at 1 g.
+2. **Pad.** In SETTLING and READY the state integrates every frame but is zeroed whenever the sample is stationary. Since 13 Nov 2026 a sample is stationary when all three hold:
+   - |ω| < 0.1 rad/s;
+   - | |f| − 9.80665 | < 2.5 m/s² (plausibly 1 g: wide enough for the sensor's offset and scale error, `NAV_STILL_BAND_MPS2`);
+   - | |f| − its own running mean | < 0.5 m/s² (steady: mean of the first 100 in-band samples, then a 0.5 s time constant; samples outside the band never enter the mean).
+
+   Liftoff is therefore still integrated from its first high-g sample.
+
+   **Why it changed (bench, 13 Nov).** The rule was | |f| − g_ref | < 0.5 m/s², with g_ref starting at 9.80665 and frozen after 4 096 samples. This board's accelerometer reads |f| = 1.00 g lying level and 0.91 g rolled 87°: about 0.09 g (0.9 m/s²) of offset or scale error on one axis (which of the two is not known from two attitudes). After the airframe was turned, no sample was ever stationary again, and the pad state integrated the offset: v at −0.9 m/s per second, h to −22 km in 4 minutes, q̂ to 26 kPa, all with `NAV_F_INIT` set, so q̂ counted as valid. In flight that would mean a roll gain c/q̂ several times too low, and, once the drift exceeds the burnout speed, an apogee call (v_up < 0) at the start of the coast. It needs the board powered in one attitude and launched in another with offsets more than 0.5 m/s² apart: plausible (power on horizontal, raise to vertical), not seen on a pad. Paired SITL, 600 flights (bench01 servo, build tolerances): 100 % pass before and after, coast roll RMS within 0.7 °/s flight by flight, q̂ error within 0.14 points.
 
    HITL confirms it: G79W liftoff detected at 0.09 s with no velocity lost.
 3. **q̂.**
@@ -34,7 +39,7 @@ A loosely coupled block, kept separate from the IEKF. Nothing aids velocity in f
    - Reported as 0 below 5 m/s.
    - Ground speed stands in for airspeed.
    - **Site:** MRC, near Twycross, `NAV_SITE_ELEV_M` = 110 m. This is an estimate and is not verified. The GPS pad average replaces it whenever there is a fix (HDOP ≤ 3, ≥ 6 satellites).
-4. **Saturation.** If any accel axis is at ≥ 15.5 g, `NAV_F_SAT` is set. v, h and q̂ are then invalid until the next pad reset.
+4. **Saturation.** If any accel axis is at ≥ 15.5 g for more than 4 frames in total since the pad (20 ms, `NAV_SAT_BUDGET_N`, ADR-004 §7), `NAV_F_SAT` is set. v, h and q̂ are then invalid until the next pad reset. Until 8 Nov the first clipped frame set it.
 5. **GPS.** Only in DESCENT and LANDED:
    - a 2-state [h, v_up] Kalman update with a χ²(1) = 16 gate;
    - re-anchors to the fix (h = GPS, v_up = 0, P reset) if the solution is saturated, or after 5 consecutive gate rejections.
@@ -46,8 +51,8 @@ A loosely coupled block, kept separate from the IEKF. Nothing aids velocity in f
    |---|---|---|
    | READY → BOOST | axial f > 3 g for 100 ms **and** v_up > 8 m/s; or 300 ms of acceleration alone if nav is saturated. READY is held while liftoff is being confirmed. | Changed after HITL-02: the old rule (50 ms, acceleration only) fired on a 6 g / 60 ms pad knock |
    | BOOST → COAST | after 0.1 s, axial f < 0 for 50 ms | |
-   | COAST → DESCENT | v_up < 0 for 50 ms (nav valid), else timer 15 s after COAST entry | I205W coast 12.2 s + 20 % |
-   | DESCENT → LANDED | after 5 s: \|f\| ≈ g, \|ω\| < 0.2 rad/s, GPS-aided \|v_up\| < 1.5 m/s for 2 s; else timer 300 s | |
+   | COAST → DESCENT | v_up < 0 for 50 ms (nav valid), else timer 11.5 s after COAST entry (`DET_T_APOGEE_MAX_S`, set per motor) | 15 s until ADR-004 §7; MC-01 §4 gives the per-motor value |
+   | DESCENT → LANDED | after 15 s: \|f\| ≈ g, \|ω\| < 0.2 rad/s, GPS-aided \|v_up\| < 1.5 m/s for 2 s; or an impact shock > 3 g then 2 s of stillness; or 30 s of stillness; else timer 300 s | 5 s and the GPS rule only until ADR-004 §5 |
 
    **Arbiter order (fixed during HITL).** Detectors run **before** the READY → SETTLING demotion. Liftoff on a fast motor clips the accelerometer, which trips `accel_rng` (SOFT) in the same frames. Under the old order the board demoted itself and flew the whole I205W flight in SETTLING with control off.
    - A HARD fault still blocks every request except landing.
