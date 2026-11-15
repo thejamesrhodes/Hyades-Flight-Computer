@@ -5,7 +5,7 @@
 **Data:** two 240 fps phone videos (not in the repo), the console log, and dot tracks, click times and scripts in `Firmware/FC-V4/Tools/bench/jog_laser/reanalysis/` (`README.md` there gives the run order). The rev 1 pipeline one level up is kept but superseded.
 **Closes in part:** PLAN-01 G1 and G4, MC-01 A17–A21. REVIEW-01 carries the knock-on findings.
 
-**Units.** Angles are *commanded degrees*: pixels are scaled by the servo's own response to 1° and 10° jogs at `board.h`'s 6.667 µs/°. True canard angle = K × commanded, and **K = 0.75** (§3.7): multiply every angle and rate in §3 by 0.75 for the canard. The firmware scale was corrected the same day, so from build `75638673` on commanded = true.
+**Units.** Angles are *commanded degrees*: pixels are scaled by the servo's own response to 1° and 10° jogs at `board.h`'s 6.667 µs/°. True canard angle = K × commanded, and **K = 0.75** (§3.7): multiply every angle and rate in §3 by 0.75 for the canard. The firmware scale was corrected the same day, so from build `75638673` on commanded = true. **15 Nov: K = 0.75 is not confirmed.** Measured on the hub (BENCH-02 §11), the canard turns 0.86 of the command at 8.889 µs/°, which predicts K ≈ 0.645 here; at the corrected 8.889 µs/° commanded ≠ true either.
 **Labels.** [F] measured, [I] inference, [S] speculation.
 
 ## 1. Setup

@@ -57,16 +57,19 @@ def sample(rng, motor, a):
                  sv_lash=U(0.0015, 0.0038))      # 0.135 deg bare servo; flight-like drive not yet measurable
     if a.servo == "bench02":
         # BENCH-02 (14 Nov 2026): joint fit of steps, sines, creep and a flight replay, fin 2 on USB 5 V
-        # (fit_servo.py). sv_tau: 9.3 ms from pulse start less the 1.5 ms pulse read (in sv_extra) and 0-2.5 ms
-        # of camera rolling shutter. sv_rate: model fit 538 deg/s, peak seen on 20-30 deg steps 645-827 deg/s,
-        # measured at the bench supply (sv_volt_k 1).
-        d.update(sv_sod=U(0.0029, 0.0034),      # 0.165-0.195 deg (fit 0.181)
-                 sv_land=U(0.0017, 0.0033),      # landing scatter 0.10-0.19 deg sd
+        # (fit_servo.py), in TRUE canard angle. BENCH-02 section 11 (hub video, 15 Nov): the canard turns
+        # 0.86 (+0.03/-0.015) of the command at SERVO_RANGE_DEG 135, so the laser-run angles (calibrated
+        # as if command = true) are x0.86 here. sv_sod stays in command units (the servo input threshold,
+        # 1.6 us). sv_tau: 9.3 ms from pulse start less the 1.5 ms pulse read (in sv_extra) and 0-2.5 ms of
+        # camera rolling shutter. Set sv_gain=1 once the firmware scale is corrected.
+        d.update(sv_sod=U(0.0029, 0.0034),      # 0.165-0.195 deg of command (fit 0.181)
+                 sv_land=U(0.0015, 0.0028),      # landing scatter 0.085-0.16 deg sd, true
                  sv_db=0.0,
                  sv_tau=U(0.0053, 0.0078),
                  sv_wn=U(120, 140), sv_zeta=U(0.72, 0.80),
-                 sv_rate=U(9.0, 14.4), sv_volt_k=1.0,
-                 sv_lash=U(0.0021, 0.0027))      # 0.12-0.155 deg (fit 0.139)
+                 sv_rate=U(7.7, 12.4), sv_volt_k=1.0,   # 440-710 deg/s true at the bench supply
+                 sv_lash=U(0.0018, 0.0023),      # 0.10-0.13 deg true (fit 0.139 x 0.86)
+                 sv_gain=U(0.845, 0.89))         # true canard angle per commanded angle
     for kv in a.set:
         k, v = kv.split("=", 1); d[k] = float(v) if v.replace(".", "", 1).replace("-", "", 1).isdigit() else v
     return d

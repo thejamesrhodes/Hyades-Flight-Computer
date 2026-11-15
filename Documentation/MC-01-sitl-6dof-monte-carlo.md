@@ -92,6 +92,7 @@ Status codes:
 - A21: 5.4–6.3 rad/s seen on 7.5° steps, a lower bound.
 - `mc.py --servo bench01` runs the measured model. Default dispersions, 360 paired flights: 96.4 % against 96.7 % for the legacy servo model. Build tolerances, 1 200 paired flights: **100 %** against 99.8 %, with coast RMS p95 19.9 °/s and peak p95 111 °/s (max 238), so G1 and G2 hold (REVIEW-01 §3). The rows above still describe the default run.
 - **Pulse scale (REVIEW-01 F1): closed 10 Nov.** The firmware had commanded 6.667 µs/° while the servo follows 8.889, so every canard angle flown would have been 0.75 of nominal. `board.h` is corrected. The simulations here always took true = commanded, so they describe the corrected firmware.
+- **Pulse scale reopened 15 Nov (BENCH-02 §11).** Measured on the hub, the canard turns 0.86 (+0.03/−0.015) of the command at 8.889 µs/°, so the servo is ≈ 10.3 µs/°. `mc.py --servo bench02` now holds the BENCH-02 model in true canard angle with `sv_gain` 0.845–0.89. Build tolerances, 600 flights: 599/600 (one G104T flight peaks at 262 °/s), coast RMS p95 21.5 °/s, peak p95 118 °/s; G104T alone misses G2 (25.9) and G1 (124). Set `sv_gain` = 1 once `SERVO_RANGE_DEG` is corrected.
 
 ## 3. Requirements (confirmed by James on 8 Nov; roll and lock-in tightened to the verified design)
 
@@ -187,6 +188,7 @@ make                                                          # sitl (the flight
 python mc.py --n 200 --cant_sd 0.1 --fin1_sd 0.1 --bear_max 0.006 --out runs/V_active
 python mc.py --n 40 --fault hardover --out runs/V_fault_hardover
 python mc.py --n 60 --servo bench01 --out runs/bench01                  # measured servo (BENCH-01 rev 2)
+python mc.py --n 100 --servo bench02 --cant_sd 0.1 --fin1_sd 0.1 --bear_max 0.006 --out runs/bench02   # BENCH-02 servo, as-built scale
 python mc.py --n 30 "--variant=-DCTRL_ROLL_C=18.0f" --out runs/c18      # gain sweeps
 python rerun.py runs/V_active/runs.csv <seed> trace.csv                 # one run with a trace
 python mc_figures.py

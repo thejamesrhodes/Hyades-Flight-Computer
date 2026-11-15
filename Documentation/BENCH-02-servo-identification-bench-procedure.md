@@ -1,6 +1,6 @@
 # BENCH-02: servo identification, bench procedure and tools
 
-**Rev 2, 14 November 2026.** **Status:** first recordings analysed (§10): the servo model is fitted and the SITL re-run with it. **Open:** the absolute pulse scale (§10.6) needs one tape-measure reading.
+**Rev 3, 15 November 2026.** **Status:** first recordings analysed (§10), and the pulse scale measured on the hub (§11): the canard turns **0.86** of the command at the current firmware scale. **Open:** correct the firmware scale (§11.4), measure fins 0, 1, 3.
 **Applies to:** FC-V4, Blue Bird BMS-127WV+, direct drive, 5 V servo rail from USB (this board's limit).
 **Code:** `Core/hyades/svc/bench.c/h`, `bench_profiles.c` (generated), `bench` command in `Core/Src/app.c`, `CFG_BENCH_PROFILE` in `board.h`; tools in `Tools/bench/servo_id/`.
 **Tests:** `Tests/test_bench.c` (6), `Tests/test_tools.py::BenchProfiles` (3).
@@ -161,6 +161,8 @@ Settled levels within ±10° sit 0.10–0.19° (sd) from the fitted model: 112 l
 
 ### 10.4 Fitted servo model (`fit_servo.py`, steps + sines + creep + `flightn` together)
 
+Angles here are in **commanded** degrees (the maps assume command = true). In true canard angle multiply by 0.86 (§11); the threshold is a property of the command and stays as listed.
+
 | Parameter | BENCH-02 | BENCH-01 | SITL `bench02` draw |
 |---|---|---|---|
 | Input threshold `sv_sod` | 0.18° (1.6 µs) | 0.225° (2.0 µs) | 0.165–0.195° |
@@ -183,7 +185,7 @@ Six motors × 100 flights at build tolerance, same seeds as the bench01 campaign
 - **Peak roll** p95 / max 106 / 224 °/s (G1 ≤ 120).
 - **Paired against bench01:** −0.2 °/s coast RMS. The main change is the shorter measured dead time.
 
-### 10.6 Absolute pulse scale: still open
+### 10.6 Absolute pulse scale (superseded by §11)
 The calibration maps assume a 10° command is 10° at the canard, which is the question REVIEW-01 F1 left for a physical check. The camera can only bound it.
 - Take 24 mm as the 35 mm-equivalent focal length (diagonal), with the camera 5 cm behind the laser and 2.66 m to the ceiling. Then the ±10° holds give canard/command = 0.88, and the −20° hold gives 0.84.
 - k = 1 would need about 21 mm equivalent. The 240 fps crop and the lens distortion are unknown, so the camera method is good to about ±10 %. It can't separate 1.0 from 0.9, or rule out 0.75 with confidence.
@@ -203,3 +205,65 @@ At 2.66 m it should be 938 mm for k = 1 and 700 mm for k = 0.75 (flat ceiling sq
   - fins 0, 1 and 3 (only fin 2 was measured);
   - the 7.4 V rail on later boards.
 - **For the next recording:** keep the phone fixed for the whole set and record `stair`. Put the LEDs on the line of the dot's path (§3); with the phone upright and the dot travelling along the long side, that means above or below the end of its path.
+
+## 11. Pulse scale measured on the hub, 15 November 2026
+
+![Hub at five commands](Images/bench02/bench02_hub_views.png)
+
+![Angle map, residuals, estimators, SITL](Images/bench02/bench02_hub_scale.png)
+
+**Result (fact, with the uncertainty below):** at the firmware's 8.889 µs per commanded degree (`SERVO_RANGE_DEG 135`), fin 2 turns **0.86 (+0.03 / −0.015) of the command** over ±40°. So the servo is about **10.3 µs/°** (10.1–10.6), not the data sheet's 8.889, and 1100–1900 µs is about 78°, not 90°. The data sheet scale and BENCH-01's 0.75 at the old scale are both ruled out.
+
+### 11.1 Recording and method
+- **Recording.** Phone video, 1080p at 120 fps, hand-held, looking along fin 2's hinge axis at the hub (two screw heads, the laser module and the 6704 bearing in view).
+- **Commands.** `cal jog 2 ±10` in ALIGN; the flight law commands 0 there, so each level is a static pulse of 1520 + 8.889·L µs:
+  - `cal set 2 0`, then up to +60° (the +70° jog was refused);
+  - then down to −60° (the −70° jog was refused).
+  - 19 levels, matched to the video by the console times (first jog at t = 1.36 s in both).
+- **Camera shake removed.** Every frame is registered to the rocket body (ECC, rotation + translation, correlation ≥ 0.95). The frames of each level are averaged after the servo has settled: 41–236 frames per level, split odd/even for a noise estimate.
+- **Angle from the screw-to-screw vector** v = S₂ − S₁, with each screw found by matching its own appearance at 0°, rotated and masked to the head (correlation 0.79–0.998).
+  - Being a difference, v is free of parallax and translation from the hand-held camera.
+  - Under a fixed view it traces one origin-centred ellipse, so the view tilt is removed by one shared rectification.
+  - Perspective enters only at second order: the screws are 13 mm apart, about 10 cm from the lens.
+- **Tilt.** From the constancy of the screw separation, the axis ratio is 0.986 ± 0.005 (about 10° of tilt), and the rectification changes k by 0.004.
+  - The 6704 bearing's dark outer gap, fitted jointly over all levels, gives 0.955. Rectifying with that makes the screw separation *less* steady (1.7 % against 0.8 %).
+  - Inference: the gap is a 3-D groove, seen into on one side at this tilt. It is kept as the upper bound of the tilt error.
+
+### 11.2 Results
+| Quantity | Value |
+|---|---|
+| canard / command, fit over \|cmd\| ≤ 40° (adopted) | **0.861** ± 0.004 (jackknife) |
+| … over ≤ 10° / 20° / 30° / 60° | 0.841 / 0.864 / 0.855 / 0.874 |
+| Steps of 10° within ±40° | 8.0–9.2° each; gain 0.869 ± 0.039 (12 steps), no trend: per-level scatter ≈ 0.28°, inside the ±0.4° bars |
+| Down pass − up pass, same command | +0.13° mean (0.00 to +0.39°): the lash, 0.12–0.14° |
+| Beyond ±45° (outside 1100–1900 µs) | **Moves to ±60° (987–2053 µs) with no saturation**, so REVIEW-01 F22's question is answered. Gain possibly higher there (residual +1.8° at +60°, −1.6° at −60°), but those screw matches are the weakest (correlation 0.79–0.83, a 4–6 px offset visible at +60°): not established |
+
+### 11.3 Uncertainty of k (1σ unless stated)
+| Source | How it was found | Effect on k |
+|---|---|---|
+| Measurement noise | odd/even half-averages differ ≤ 0.08° | ±0.001 |
+| Servo landing scatter, fit | jackknife over levels | ±0.004–0.006 |
+| Camera pose drift (hand-held) | the two 0° levels, both approached from above, differ by 0.66° | ±0.006 |
+| View tilt (rectification) | image plane 0.858, screws 0.861, bearing 0.884 | −0.004 / +0.023 (bearing as the bound) |
+| Feature location | template vs head-circle (0.815, noisy) and counterbore-circle (0.866) fits | about ±0.01 |
+| **Combined** | | **0.86 +0.03 / −0.015** |
+
+Cross-check: the 14 Nov ceiling-camera estimate (laser dot, nominal 24 mm lens) gave 0.84–0.88 (focal length ±10 %), consistent.
+
+### 11.4 What it changes
+- **BENCH-02 laser results (§10)** were calibrated as if the canard moved exactly ±10° for a ±10° command, so in true canard angle they are ×0.86:
+  - lash 0.12°, landing scatter 0.09–0.16°, fitted rate 460°/s;
+  - the input threshold stays 0.18° *of command* (1.6 µs);
+  - timing, ω_n and ζ are unchanged.
+- **SITL `--servo bench02`** now carries these true-angle values and `sv_gain` 0.845–0.89. Six motors × 100 flights at build tolerance:
+  - **599/600 pass.** One G104T flight peaks at 262 °/s against R5a's 240.
+  - **Coast roll RMS** p95 21.5 °/s (was 19.3 with k = 1). G104T alone reaches 25.9, against G2's 25.
+  - **Peak roll** p95 118 °/s (was 106). G77R and G104T reach 123–124, against G1's 120.
+  - Correcting the firmware scale restores the k = 1 result (600/600).
+- **Firmware (not changed yet):**
+  - `SERVO_RANGE_DEG` should be about 116 (1200 µs / 10.33 µs/°) for the canard to follow the command.
+  - That moves the zero limits to about ±56° storable and ±26° at full authority, from ±65° and ±35°.
+  - Calibration records would need converting (×135/116, same pulse), and `profiles.py` regenerating with its own scale versioned, because the 14 Nov recordings were made at 135.
+  - Decision pending.
+- **REVIEW-01 F1:** the 10 Nov hand check (0.75 at 6.667 µs/°) disagrees with this measurement, which predicts 0.645 at that scale. A ruler or tape check at ±20° would decide it independently: at 2.66 m the dots should be 1.67 m apart if k = 0.86, and 1.94 m if k = 1.
+- **The other three fins** were not measured.
