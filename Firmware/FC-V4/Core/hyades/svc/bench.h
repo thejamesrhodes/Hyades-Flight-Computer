@@ -41,9 +41,9 @@
 #define BENCH_PRE_FRAMES    300u
 #define BENCH_POST_FRAMES   300u
 #define BENCH_LED_HALF      97u     /* 0.485 s: not a whole number of 240 fps camera frames */
-#define BENCH_DITHER_TICKS  12      /* +/-1.5 us at 8 ticks/us (CTRL_DITHER_AMP_RAD, test_bench.c) */
+#define BENCH_DITHER_TICKS  14      /* +/-1.75 us at 8 ticks/us (CTRL_DITHER_AMP_RAD, test_bench.c) */
 #define BENCH_DITHER_HALF   2u      /* frames per half period: 50 Hz (CTRL_DITHER_PERIOD_N / 2)    */
-#define BENCH_TICKS_MAX     2133    /* 30 deg: the command authority (ALLOC_MAX_TICKS)             */
+#define BENCH_TICKS_MAX     2483    /* 30 deg: the command authority (ALLOC_MAX_TICKS)             */
 #define BENCH_FINS          4u
 #define BENCH_MASK_ALL      0x0Fu
 

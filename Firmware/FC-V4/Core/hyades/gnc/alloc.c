@@ -36,7 +36,7 @@ int32_t Alloc_NormToTicks(float norm)
 {
     float x = isfinite(norm) ? norm : 0.0f;
     x = clamp_sym(x, 1.0f);
-    /* |x| <= 1, so |x * ALLOC_TICKS_PER_NORM| <= 2134: in int32 range (std A2) */
+    /* |x| <= 1, so |x * ALLOC_TICKS_PER_NORM| <= 2483: in int32 range (std A2) */
     return (int32_t)lroundf(x * ALLOC_TICKS_PER_NORM);
 }
 

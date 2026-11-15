@@ -3,7 +3,7 @@
  * ============================================================================ */
 #include "align.h"
 
-_Static_assert(FINCAL_LIMIT_MDEG == 65000, "AL_ERR_RANGE text below quotes the limit");
+_Static_assert(FINCAL_LIMIT_MDEG == 56000, "AL_ERR_RANGE text below quotes the limit");
 
 void Align_Init(Align *a)
 {
@@ -84,7 +84,7 @@ const char *Align_ResultText(AlignResult r)
     case AL_ERR_ACTIVE: return "session already active";
     case AL_ERR_IDLE:   return "no session ('cal begin' first)";
     case AL_ERR_FIN:    return "fin must be 0..3";
-    case AL_ERR_RANGE:  return "zero outside +/-65 deg (the servo travel from neutral)";
+    case AL_ERR_RANGE:  return "zero outside +/-56 deg (the servo travel from neutral)";
     case AL_ERR_STEP:   return "jog larger than 10 deg (use 'cal set')";
     default:            return "?";
     }

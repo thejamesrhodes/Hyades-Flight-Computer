@@ -112,7 +112,10 @@ def main():
     ap.add_argument("dir")
     ap.add_argument("--runs", default="steps,sine1,sine3,sine03,creep,flightn")
     ap.add_argument("--out")
+    ap.add_argument("--range-deg", type=int, default=P.RANGE_NOW, choices=sorted(P.RANGES),
+                    help="servo scale the recording was played at (SERVO_RANGE_DEG): 135 for the 14 Nov 2026 recordings")
     a = ap.parse_args()
+    P.use_range(a.range_deg)
     runs = load(a.dir, a.runs.split(","))
     if not runs:
         raise SystemExit("no analysed runs found (run analyse.py first)")

@@ -7,7 +7,7 @@
 
 ## 1. Bottom line
 
-1. **The servo scale was wrong and is fixed (F1).** The firmware commanded 6.667 µs/°; the servo follows the maker's 8.889 µs/°, so every canard angle was 0.75 of the command. James confirmed 0.75 on the bench. `board.h` now uses `SERVO_RANGE_DEG 135`, and the build is flashed and running (`75638673+01b712`). **15 Nov: reopened.** Measured on the hub, the canard turns 0.86 of the command at 8.889 µs/° (BENCH-02 §11), so the servo is ≈ 10.3 µs/° and the 0.75 check is not confirmed.
+1. **The servo scale was wrong and is fixed (F1).** The firmware commanded 6.667 µs/°; the servo follows the maker's 8.889 µs/°, so every canard angle was 0.75 of the command. James confirmed 0.75 on the bench. `board.h` now uses `SERVO_RANGE_DEG 135`, and the build is flashed and running (`75638673+01b712`). **15 Nov: reopened.** Measured on the hub, the canard turns 0.86 of the command at 8.889 µs/° (BENCH-02 §11), so the servo is ≈ 10.3 µs/° and the 0.75 check is not confirmed. Corrected the same day: `SERVO_RANGE_DEG 116`.
 2. **Requirements hold at the corrected scale.** With the build tolerances and the measured servo, 1 200 of 1 200 flights pass R1–R9; coast roll RMS p95 19.9 °/s and peak p95 111 °/s meet G1 and G2 (§3).
 3. **Flight software: two defects fixed, neither on the nominal flight path (F16, F17).** One design gap needs a decision: READY does not depend on navigation initialisation or on a still gyro calibration (F18).
 4. **c stays 15 (F4).** Sub-degree moves started 21–28 ms late in the quasi-static test. A dynamic test with dither decides.
@@ -17,7 +17,7 @@
 
 | # | Sev. | Finding | Evidence | Status |
 |---|---|---|---|---|
-| F1 | High | **Servo scale.** `board.h` mapped 900–2100 µs to 180° (6.667 µs/°). Blue Bird: 90° for 1100–1900 µs (8.889 µs/°) | [F] maker page, `board.h`. [F] James's bench check, 10 Nov: canard angle 0.75 of the command. [F] SITL at 0.75: goals G1/G2 missed at build tolerance, 89.7 % at default dispersions | **Fixed.** `SERVO_RANGE_DEG 135`; ±30° is now 266.7 µs. Zero limits re-derived (F11). Stored zeros converted × 3/4, the same pulse (CAL-01 §9). Flashed. **15 Nov (BENCH-02 §11): measured on the hub, the canard turns 0.86 of the command at this scale (servo ≈ 10.3 µs/°), so the data-sheet 8.889 µs/° is about 14 % off and the 10 Nov 0.75 check (which this predicts as 0.645) is not confirmed. Reopened: `SERVO_RANGE_DEG` ≈ 116 pending.** |
+| F1 | High | **Servo scale.** `board.h` mapped 900–2100 µs to 180° (6.667 µs/°). Blue Bird: 90° for 1100–1900 µs (8.889 µs/°) | [F] maker page, `board.h`. [F] James's bench check, 10 Nov: canard angle 0.75 of the command. [F] SITL at 0.75: goals G1/G2 missed at build tolerance, 89.7 % at default dispersions | **Fixed.** `SERVO_RANGE_DEG 135`; ±30° is now 266.7 µs. Zero limits re-derived (F11). Stored zeros converted × 3/4, the same pulse (CAL-01 §9). Flashed. **15 Nov (BENCH-02 §11): measured on the hub, the canard turns 0.86 of the command at this scale (servo ≈ 10.3 µs/°), so the data-sheet 8.889 µs/° is about 14 % off and the 10 Nov 0.75 check (which this predicts as 0.645) is not confirmed. Fixed again 15 Nov:** `SERVO_RANGE_DEG 116` (10.34 µs/°), zero limits ±56°/±26°, calibration record version 4 converts versions 3 and 2 to the same pulse (CAL-01 §10). Flashed `a5dc2489`; SITL with the BENCH-02 servo 600/600 |
 | F2 | High | **Setup B is restricted above about −21° commanded (old scale).** A 10° jog delivered 4.75° and held 2.4 s; something then slipped by about 1.2° | [F] BENCH-01 §3.4 | **Open: check by hand.** A stalled servo draws up to 1.3 A |
 | F3 | Med. | **Dead band is a 2.0 µs threshold on the input, not ±1 µs on the error**, plus a landing error of SD 0.15° | [F] BENCH-01 §3.1–3.2 | **Fixed in the models:** `sv_sod`, `sv_land` in `sitl.c`; `mc.py --servo bench01` (true angles); `hitl_model.SERVO_BENCH01`. MATLAB not changed |
 | F4 | Med. | **Sub-degree moves start late.** 0.225° updates start 21–28 ms after larger jogs | [F] BENCH-01 §3.6. [F] Margins at c = 15 with τ_d 39 ms: PM 54.6°, GM 7.6 dB; at Ixx −30 %: 38.3°, 4.5 dB. At c = 18 and that corner: 26.9°, 3.0 dB | **Open: dynamic test** with dither (BENCH-01 §6). c stays 15 |
@@ -124,8 +124,8 @@ Worst-case margins over the envelope and ±30 % aero (`roll_margins.py`, ADR-004
 
 ## 6. Actions for James
 
-1. ~~Confirm on the bench that a 10° jog is 10° at the canard.~~ Measured 15 Nov: 0.86 (BENCH-02 §11). Decide the `SERVO_RANGE_DEG` correction.
+1. ~~Confirm on the bench that a 10° jog is 10° at the canard.~~ Measured 15 Nov: 0.86 (BENCH-02 §11); corrected to `SERVO_RANGE_DEG 116`. Check 10° is now 10° at the canard.
 2. Hand check of setup B at the old −10° position (F2).
 3. Decide F18 (READY gate) and F24 (flight READY hold).
-4. Re-align and save, so the stored record is version 3.
+4. Re-align and save, so the stored record is version 4.
 5. Record the servo supply voltage, then the scripted dynamic run with dither on and off (BENCH-01 §6).

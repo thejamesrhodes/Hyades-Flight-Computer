@@ -37,7 +37,7 @@ void PWM_SetFinTicks(uint8_t fin_idx, int32_t ticks);
 /* Centre all fins (failsafe / inactive). */
 void PWM_CentreFins(void);
 /* Per-fin mechanical zero, millidegrees at the servo (CAL-01). Clamped to
- * +/-FINCAL_LIMIT_MDEG (65 deg). Applies from the next PWM_SetFin / PWM_CentreFins. */
+ * +/-FINCAL_LIMIT_MDEG (56 deg). Applies from the next PWM_SetFin / PWM_CentreFins. */
 void PWM_SetZeroMdeg(const int32_t mdeg[FIN_COUNT]);
 
 /* Start the next pulse on all channels now (frame-synchronous servo update). */

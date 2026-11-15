@@ -78,11 +78,11 @@ a3.set_xlim(0.72, 1.05); a3.set_xlabel("canard / command (fit |cmd| ≤ 40°, ja
 a3.set_title("All estimators 0.82–0.88 (circle fits are the noisy ones); shaded: adopted 0.86 +0.03/−0.015", fontsize=10)
 a4 = ax[1, 1]
 mot = ["G40W", "G53FJ", "G79W", "G80T", "G77R", "G104T"]
-k1 = {"G40W": [18.3, 85.2], "G53FJ": [16.5, 78.3], "G79W": [18.7, 109.0], "G80T": [19.9, 112.8], "G77R": [20.1, 113.8], "G104T": [22.9, 111.9]}
+k1 = {"G40W": [18.4, 84.9], "G53FJ": [16.4, 77.8], "G79W": [19.3, 101.1], "G80T": [19.2, 108.4], "G77R": [20.0, 111.4], "G104T": [22.9, 115.2]}   # NV5a, SERVO_RANGE_DEG 116
 k86 = {"G40W": [20.6, 95.2], "G53FJ": [18.5, 86.2], "G79W": [21.3, 118.9], "G80T": [21.8, 119.2], "G77R": [22.7, 122.6], "G104T": [25.9, 124.1]}
 xi = np.arange(len(mot)); w = 0.38
-a4.bar(xi - w/2, [k1[m][0] for m in mot], w, color=OI["sky"], label="scale corrected (canard = command)")
-a4.bar(xi + w/2, [k86[m][0] for m in mot], w, color=OI["verm"], hatch="//", edgecolor="white", label="as built now (canard = 0.86 × command)")
+a4.bar(xi - w/2, [k1[m][0] for m in mot], w, color=OI["sky"], label="corrected, SERVO_RANGE_DEG 116 (canard 0.98-1.04 x command)")
+a4.bar(xi + w/2, [k86[m][0] for m in mot], w, color=OI["verm"], hatch="//", edgecolor="white", label="as built 10-15 Nov, 135 (canard 0.845-0.89 x command)")
 a4.axhline(25, color=OI["black"], ls="--", lw=1); a4.text(5.45, 25.4, "goal G2 ≤ 25 °/s", fontsize=8, ha="right")
 a4.set_xticks(xi); a4.set_xticklabels(mot); a4.set_ylabel("coast roll RMS p95, °/s"); a4.set_ylim(0, 34); a4.legend(fontsize=8, loc="upper left", ncol=1, framealpha=0.9)
 a4.set_title("SITL, 600 flights per case: 600/600 corrected, 599/600 as built", fontsize=10)

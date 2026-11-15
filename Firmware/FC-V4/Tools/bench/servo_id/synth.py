@@ -69,7 +69,10 @@ def main():
     ap.add_argument("--skew-rows", type=float, default=0.0, help="move the LEDs this fraction of the picture height off the dot's row")
     ap.add_argument("--ppm", type=float, default=80.0); ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--readout-ms", type=float, default=3.5, help="rolling-shutter readout time, top to bottom")
+    ap.add_argument("--range-deg", type=int, default=P.RANGE_NOW, choices=sorted(P.RANGES),
+                    help="servo scale the recording was played at (SERVO_RANGE_DEG): 135 for the 14 Nov 2026 recordings")
     a = ap.parse_args()
+    P.use_range(a.range_deg)
     rng = np.random.default_rng(a.seed)
     # timeline in FC seconds: 2 s idle (normal 1 Hz blip), then each run, 2 s idle between
     segs, t_at = [], 2.0

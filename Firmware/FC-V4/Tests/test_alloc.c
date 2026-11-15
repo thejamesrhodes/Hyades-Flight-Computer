@@ -95,7 +95,8 @@ static void test_roll_priority_saturation(void)
     Alloc_Apply(&A, cmd, true, out);
     TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.95f, A.v[0]);
     TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.05f, fabsf(A.v[1]) + fabsf(A.v[3]));
-    for (uint32_t i = 0u; i < 4u; i++) { TEST_ASSERT_TRUE(fabsf(out[i]) <= 1.0f); }
+    /* the quantiser rounds to the nearest tick: full authority may be up to half a tick over */
+    for (uint32_t i = 0u; i < 4u; i++) { TEST_ASSERT_TRUE(fabsf(out[i]) <= (1.0f + (0.5f / ALLOC_TICKS_PER_NORM))); }
 }
 
 /* quantiser is safe on NaN and out-of-range input */
@@ -105,9 +106,9 @@ static void test_norm_to_ticks_safe(void)
     TEST_ASSERT_EQUAL_INT32((int32_t)lroundf(ALLOC_TICKS_PER_NORM), Alloc_NormToTicks(5.0f));
     TEST_ASSERT_EQUAL_INT32(-(int32_t)lroundf(ALLOC_TICKS_PER_NORM), Alloc_NormToTicks(-5.0f));
     TEST_ASSERT_EQUAL_INT32(0, Alloc_NormToTicks(-INFINITY));   /* non-finite -> centre */
-    /* the servo scale: 30 deg at the maker's 8.889 us/deg is 266.7 us (REVIEW-01 F1) */
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 8.889f, ALLOC_US_PER_DEG);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 266.67f, ALLOC_TICKS_PER_NORM / (float)PWM_TICKS_PER_US);
+    /* the servo scale as measured, 10.34 us/deg: 30 deg is 310.3 us (BENCH-02 section 11) */
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 10.345f, ALLOC_US_PER_DEG);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 310.34f, ALLOC_TICKS_PER_NORM / (float)PWM_TICKS_PER_US);
 }
 
 int main(void)

@@ -98,7 +98,8 @@ def roll_coeffs(P: dict, mach: float) -> tuple[float, float]:
 # BENCH-01 (10 Nov 2026) measured servo, as overrides of P.Servo (SimCfg.servo), in true canard angle at
 # 8.889 us/deg: a new target only after a 2.0 us command change (Sod, 0.225 deg), a repeatable landing
 # error per target (Land, 1-sigma 0.16 deg), no separate error dead zone, 130 rad/s, zeta 0.8, lash 0.135 deg.
-# Unloaded, one servo. The same input stage as sv_sod / sv_land in Tools/sitl/sitl.c.
+# Unloaded, one servo. The same input stage as sv_sod / sv_land in Tools/sitl/sitl.c. Kept as it was: BENCH-02
+# section 11 later measured the servo at 10.34 us/deg, so these angles are about x0.86 in truth.
 SERVO_BENCH01 = {"Sod": 0.0039, "Land": 0.0028, "Deadband": 0.0, "f_N": 130.0, "Zeta": 0.8, "Lash": 0.0024}
 
 

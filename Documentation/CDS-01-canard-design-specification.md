@@ -64,7 +64,7 @@ deliberate and correct for this airframe; see §8.
 | Stall torque | 0.5198 N·m (5.3 kg·cm) | datasheet |
 | Speed | 0.05 s / 60° | datasheet |
 | Derived no-load rate | 23.65 rad/s | fitted from four (V, torque, t60) points |
-| Pulse width | 1100–1900 µs for 90° | datasheet → **8.889 µs/deg** |
+| Pulse width | 1100–1900 µs for 90°, 8.889 µs/deg (datasheet). **Measured: 10.34 µs/deg**, so 1100–1900 µs is about 78° | datasheet; BENCH-02 §11 |
 | **Dead band** | **2 µs = 0.225° window** | datasheet → **0.00196 rad half-width** |
 | **Backlash** | **0.115°** = 0.00200 rad | manufacturer, direct: 0.2 mm at 100 mm arm |
 | Frame rate | 3 ms minimum frame (333 Hz); **250 Hz** in this design, 200 Hz in the firmware (ADR-004) | datasheet |
@@ -79,7 +79,7 @@ deliberate and correct for this airframe; see §8.
 - f_N 130 rad/s, ζ 0.8; dead time under about 13 ms for steps of 1° or more.
 - The dead band is a 2.0 µs threshold on the input each way, twice the ±1 µs window above.
 - Lash about 0.135° (0.18° in the commanded units of the time).
-- **Pulse scale: resolved 10 Nov.** The firmware had mapped 900–2100 µs to 180° (6.667 µs/°). James's bench check found the canard moving 0.75 of the command, which is the 8.889 µs/° in this table, and `board.h` now uses it (`SERVO_RANGE_DEG 135`, REVIEW-01 F1).
+- **Pulse scale: resolved 10 Nov.** The firmware had mapped 900–2100 µs to 180° (6.667 µs/°). James's bench check found the canard moving 0.75 of the command, which is the 8.889 µs/° in this table, and `board.h` now uses it (`SERVO_RANGE_DEG 135`, REVIEW-01 F1). **Superseded 15 Nov:** measured on the hub, the canard turned 0.86 of the command at 8.889 µs/°, so the servo is about 10.3 µs/°; `board.h` now uses `SERVO_RANGE_DEG 116` (BENCH-02 §11).
 
 **Direct drive is mandatory, not a default.** A reduction stage would shrink the
 dead zone at the canard by 1/n but adds its own backlash in series with the

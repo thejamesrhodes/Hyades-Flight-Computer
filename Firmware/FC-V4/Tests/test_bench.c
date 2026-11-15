@@ -129,7 +129,7 @@ static void test_mask_hold_and_stop(void)
     for (uint32_t i = 0u; i < 1000u; i++) { Bench_Step(&B, &o); }
     TEST_ASSERT_TRUE(Bench_Active(&B));
     TEST_ASSERT_TRUE(o.led);
-    TEST_ASSERT_EQUAL_INT32(711, Bench_FinTicks(&o, 2u));               /* 10 deg x 71.11 */
+    TEST_ASSERT_EQUAL_INT32(828, Bench_FinTicks(&o, 2u));               /* 10 deg x 82.76 */
     TEST_ASSERT_EQUAL_INT32(0, Bench_FinTicks(&o, 0u));
     TEST_ASSERT_EQUAL_INT32(0, Bench_FinTicks(&o, 3u));
     TEST_ASSERT_EQUAL_INT32(0, Bench_FinTicks(&o, 7u));

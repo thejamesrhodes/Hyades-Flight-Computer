@@ -94,15 +94,18 @@
 #define SERVO_MIN_US          900u
 #define SERVO_MAX_US          2100u
 #define SERVO_CENTRE_US       1520u    /* fin zero; all fin commands are about this */
-#define SERVO_RANGE_DEG       135.0f   /* sweep over MIN..MAX at the maker's scale: the Blue Bird
-                                        * BMS-127WV+ turns 90 deg for 1100-1900 us, 8.889 us/deg.
-                                        * Bench check, 10 Nov 2026: at the old 180 (6.667 us/deg)
-                                        * the canard moved 0.75 of the command (BENCH-01, REVIEW-01
-                                        * F1). Travel outside 1100-1900 us is not on the data sheet. */
+#define SERVO_RANGE_DEG       116.0f   /* sweep over MIN..MAX as measured, 10.34 us/deg. BENCH-02
+                                        * section 11 (15 Nov 2026): at 135 (the data sheet's 90 deg
+                                        * for 1100-1900 us, 8.889 us/deg) fin 2 turned 0.861
+                                        * (+0.03/-0.015) of the command, so the servo is about
+                                        * 10.3 us/deg and MIN..MAX spans 116 deg. It follows out to
+                                        * 987-2053 us without saturating. Was 180 before 10 Nov and
+                                        * 135 until 15 Nov (REVIEW-01 F1). A whole number: pwm.c,
+                                        * fincal.h FINCAL_RANGE_DEG and bench_profiles.c check it. */
 #define FIN_DEFLECT_DEG       30.0f    /* +/- command authority about centre    */
 /* Servo timer tick (ALLOC-01). TIM2/TIM3 run from the 96 MHz APB1 timer clock;
- * PSC = clock / tick - 1. At 8 MHz one tick is 0.125 us = 0.014 deg at the
- * servo (8.889 us/deg), against 0.11 deg at the old 1 MHz tick. The fallback
+ * PSC = clock / tick - 1. At 8 MHz one tick is 0.125 us = 0.012 deg at the
+ * servo (10.34 us/deg), against 0.097 deg at a 1 MHz tick. The fallback
  * period SERVO_PERIOD_US x ticks/us must fit TIM3's 16-bit ARR (48000). */
 #define PWM_TIM_CLK_HZ        96000000u
 #ifndef PWM_TICK_HZ
@@ -112,12 +115,12 @@
 /* The per-fin mechanical zero is not a build constant: it is measured with
  * the canard alignment session ('cal' commands, CAL-01), stored in the flash
  * journal (calstore.c) and applied by PWM_SetZeroMdeg in whole ticks. The
- * neutral sits 20 us above mid-range, so the travel from it is 580 us (65.25
- * deg) one way and 620 us the other. A zero may be up to +/-65 deg
- * (FINCAL_LIMIT_MDEG); beyond +/-35 deg the pulse limit would clip the
+ * neutral sits 20 us above mid-range, so the travel from it is 580 us (56.07
+ * deg) one way and 620 us the other. A zero may be up to +/-56 deg
+ * (FINCAL_LIMIT_MDEG); beyond +/-26 deg the pulse limit would clip the
  * +/-FIN_DEFLECT_DEG authority on one side, so READY is held. Both limits are
  * checked against the pulse range in pwm.c. */
-#define FIN_ZERO_FULL_AUTH_MDEG  35000
+#define FIN_ZERO_FULL_AUTH_MDEG  26000
 
 /* ----------------------------------------------------------------------------
  * 5. CONTROLLER  —  geometric SO(3) outer loop + INDI inner loop
@@ -197,9 +200,9 @@
 #define CTRL_TRIM_BAND_K       0.3f     /* MC-01 (was 1.1, sized for c = 70: at c = 15
                                          * the band would ignore ~45 dps at max q)   */
 #endif
-#define CTRL_TRIM_DEADBAND_RAD 0.00196f /* P.Servo.Deadband (n = 1): +/-1 us at 8.889 us/deg.
+#define CTRL_TRIM_DEADBAND_RAD 0.00196f /* P.Servo.Deadband (n = 1): +/-1.16 us at 10.34 us/deg.
                                          * BENCH-01: the servo takes a new target only after a
-                                         * 2.0 us change of its input, 0.0039 rad */
+                                         * 2.0 us change of its input (BENCH-02: 1.6 us, 0.0027 rad) */
 #ifndef CTRL_TRIM_CLAMP   /* SITL sweeps override with -D */
 #define CTRL_TRIM_CLAMP        0.1047f  /* P.Trim.Clamp, +/-6 deg                  */
 #endif
@@ -224,8 +227,8 @@
 #define CTRL_DITHER_ON         1
 #endif
 #ifndef CTRL_DITHER_AMP_RAD
-#define CTRL_DITHER_AMP_RAD    (1.5f * CTRL_TRIM_DEADBAND_RAD)   /* 0.00294 rad, 0.17 deg: +/-1.5 us,
-                                         * 3.0 us peak to peak against the measured 2.0 us threshold */
+#define CTRL_DITHER_AMP_RAD    (1.5f * CTRL_TRIM_DEADBAND_RAD)   /* 0.00294 rad, 0.17 deg: +/-1.74 us,
+                                         * 3.5 us peak to peak against the measured 1.6-2.0 us threshold */
 #endif
 #ifndef CTRL_DITHER_PERIOD_N
 #define CTRL_DITHER_PERIOD_N   4u       /* 4 frames = 50 Hz at 200 Hz            */

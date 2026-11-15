@@ -1,6 +1,6 @@
 # BENCH-02: servo identification, bench procedure and tools
 
-**Rev 3, 15 November 2026.** **Status:** first recordings analysed (§10), and the pulse scale measured on the hub (§11): the canard turns **0.86** of the command at the current firmware scale. **Open:** correct the firmware scale (§11.4), measure fins 0, 1, 3.
+**Rev 3, 15 November 2026.** **Status:** first recordings analysed (§10), and the pulse scale measured on the hub (§11): the canard turned **0.86** of the command at `SERVO_RANGE_DEG 135`, so the firmware is now at 116 (§11.5). **Open:** re-align and save (CAL-01 §10); measure fins 0, 1, 3.
 **Applies to:** FC-V4, Blue Bird BMS-127WV+, direct drive, 5 V servo rail from USB (this board's limit).
 **Code:** `Core/hyades/svc/bench.c/h`, `bench_profiles.c` (generated), `bench` command in `Core/Src/app.c`, `CFG_BENCH_PROFILE` in `board.h`; tools in `Tools/bench/servo_id/`.
 **Tests:** `Tests/test_bench.c` (6), `Tests/test_tools.py::BenchProfiles` (3).
@@ -26,7 +26,7 @@ BENCH-01 gave the static behaviour of the servo (0.225° threshold, landing scat
 
 - **Firmware.** `bench run <profile> <fin>` plays a stored command profile to the chosen canard at 200 Hz. Both board LEDs (D6, D8) become a timing mark: off for 1.5 s, then on/off every 97 frames (0.485 s) for the length of the profile, then off for 1.5 s. The LED and the servo pulse of a frame change at the same instant (`PWM_Commit`).
   - Every profile's length is 97 × a different odd number, so the count of LED half periods tells the analysis which profile a video holds.
-  - Profiles are integer tick sequences. The firmware prints the CRC-32 of what it played (`BENCH done ... ok`); the analysis replays the same ticks from `profiles.py`. `test_bench.c` checks the two agree for every profile.
+  - Profiles are integer tick sequences at the current servo scale (9600 ticks over `SERVO_RANGE_DEG`; `bench_profiles.c` checks it). The 14 Nov recordings were played at 135, the firmware from 15 Nov plays 116 (§11.5). The firmware prints the CRC-32 of what it played (`BENCH done ... ok`); the analysis replays the same ticks from `profiles.py`. `test_bench.c` checks the two agree for every profile.
   - Only in SETTLING or READY with no HARD fault. A liftoff, a fault or an alignment session ends a run at once and the flight law's commands stand.
   - **Bench builds only:** `CFG_BENCH_PROFILE 1`. A build with `CFG_FLIGHT_BUILD` refuses it (`#error`).
 - **`bench hold <fin> <deg>`** holds one angle until `bench stop` (for §4).
@@ -98,6 +98,7 @@ One video per profile. For each: start recording, type the command, wait for `BE
   4. writes `<video>.runN.json` (results), `.npz` (aligned series) and `.png` (command, measured, error, LED).
 - Times are flight-computer time from RUN frame 0, whose pulse starts with the first LED edge. A servo reads a pulse at its end, about 1.5 ms later. "Delay from pulse start" includes that.
 - `fit_servo.py DIR` fits the SITL servo model to all analysed runs at once (§10.4).
+- **Servo scale of a recording:** `analyse.py`, `fit_servo.py` and `synth.py` take `--range-deg` (default 116, the firmware from 15 Nov). The 14 Nov 2026 recordings need `--range-deg 135`.
 
 ## 7. Limits
 
@@ -260,10 +261,20 @@ Cross-check: the 14 Nov ceiling-camera estimate (laser dot, nominal 24 mm lens) 
   - **Coast roll RMS** p95 21.5 °/s (was 19.3 with k = 1). G104T alone reaches 25.9, against G2's 25.
   - **Peak roll** p95 118 °/s (was 106). G77R and G104T reach 123–124, against G1's 120.
   - Correcting the firmware scale restores the k = 1 result (600/600).
-- **Firmware (not changed yet):**
-  - `SERVO_RANGE_DEG` should be about 116 (1200 µs / 10.33 µs/°) for the canard to follow the command.
-  - That moves the zero limits to about ±56° storable and ±26° at full authority, from ±65° and ±35°.
-  - Calibration records would need converting (×135/116, same pulse), and `profiles.py` regenerating with its own scale versioned, because the 14 Nov recordings were made at 135.
-  - Decision pending.
+- **Firmware:** changed on 15 Nov (§11.5).
 - **REVIEW-01 F1:** the 10 Nov hand check (0.75 at 6.667 µs/°) disagrees with this measurement, which predicts 0.645 at that scale. A ruler or tape check at ±20° would decide it independently: at 2.66 m the dots should be 1.67 m apart if k = 0.86, and 1.94 m if k = 1.
 - **The other three fins** were not measured.
+
+### 11.5 Firmware scale corrected, 15 November 2026
+- **Change (decided by James, 15 Nov).** `SERVO_RANGE_DEG` 135 → **116**: 10.34 µs/°, 82.76 ticks/°, one tick 0.012°. A 30° command is 310.3 µs (2 483 ticks). The measured 116.2 (= 135 × 0.861) rounds to 116, so the canard should now turn 1.00 of the command (0.98–1.04 with §11.3's uncertainty).
+- **Zero limits** from the 580 µs to the nearer pulse limit: ±56° storable (`FINCAL_LIMIT_MDEG`), ±26° for full authority (`FIN_ZERO_FULL_AUTH_MDEG`); were ±65° and ±35°.
+- **Stored calibrations.** Record version 4. Version 3 (135) is read × 116/135 and version 2 (180) × 116/180, which is the same pulse to within 5 ns (CAL-01 §10).
+- **Bench profiles.** `profiles.py` builds the set at any known scale (`use_range`). The firmware table is regenerated at 116, so the CRCs differ from 14 Nov. A tool test checks that the 135 set still reproduces the 14 Nov CRCs, so those recordings can be re-analysed (`--range-deg 135`). The bench dither is ±14 ticks (±1.75 µs), the flight dither's ±0.17° at the new scale.
+- **Dither and trim dead band** are in radians of canard angle, so they are unchanged in angle. In pulse width the dither is now ±1.74 µs (3.5 µs peak to peak) against the measured 1.6–2.0 µs threshold.
+- **Checks.**
+  - Host tests: 123 pass (a version 3 conversion test added; align, alloc, bench and fincal updated to the new limits and scale).
+  - Tool tests: 20, all pass (1 skipped).
+  - CubeIDE build `a5dc2489+1093e7`: 86 952 B, 0 warnings, flashed over USB.
+  - On the board: the stored version 3 record read and converted (fin 2: −15.500° at 135 → −13.319° at 116, both 137.8 µs below centre), READY reached, `bench hold 2 10` = 828 ticks.
+- **SITL `--servo bench02`** now models the corrected firmware: `sv_gain` 0.983–1.036 and the 1.6 µs threshold as 0.142–0.168° of command. `--servo bench02_135` keeps the as-built case. Build tolerances, 600 flights, paired seeds: **600/600**, coast roll RMS p50/p95/max 9.4/19.1/34.0 °/s, peak roll p95/max 106/220 °/s; worst motor G104T 22.9 / 115 °/s, so G1 and G2 hold for every motor. Against the as-built 135 (599/600, 21.5, 118): paired median −1.1 °/s coast RMS, −4.9 °/s peak.
+- **Not done:** a check that 10° is now 10° at the canard (the §4 tape check, or a repeat of the hub video); re-alignment; fins 0, 1, 3.

@@ -7,7 +7,7 @@
  *
  *   0  magic   u32  'FCAL'
  *   4  seq     u16  increments on every save
- *   6  version u8   FINCAL_VERSION (FINCAL_VERSION_OLD is read and converted)
+ *   6  version u8   FINCAL_VERSION (versions 2 and 3 are read and converted)
  *   7  count   u8   4 (fins)
  *   8  off     i32[4]  millidegrees, fin 0 top, 1 right, 2 bottom, 3 left
  *  24  spare   u8[4]   zero
@@ -26,18 +26,25 @@
 
 #define FINCAL_REC_SIZE    32u
 #define FINCAL_MAGIC       0x4C414346u     /* "FCAL" little-endian */
-#define FINCAL_VERSION     3u      /* 3: degrees at the maker's 8.889 us/deg, +/-65 deg */
-#define FINCAL_VERSION_OLD 2u      /* 2: degrees at 6.667 us/deg (firmware before 10 Nov 2026), +/-90
-                                    * deg. Still read: each zero is converted x 3/4, which is the
-                                    * same pulse, so an alignment made at the old scale holds. */
-#define FINCAL_LIMIT_OLD_MDEG 90000
+#define FINCAL_VERSION     4u      /* 4: degrees at 10.34 us/deg (SERVO_RANGE_DEG 116, from 15 Nov 2026), +/-56 deg */
+#define FINCAL_RANGE_DEG   116     /* the scale of FINCAL_VERSION; pwm.c checks it against board.h */
+/* Older records are still read. Each zero is converted to the same pulse (x FINCAL_RANGE_DEG / old
+ * range), so an alignment made at an older scale holds:
+ *   3: degrees at 8.889 us/deg (range 135, 10-15 Nov 2026), +/-65 deg;
+ *   2: degrees at 6.667 us/deg (range 180, before 10 Nov 2026), +/-90 deg. */
+#define FINCAL_V3          3u
+#define FINCAL_V3_RANGE_DEG   135
+#define FINCAL_V3_LIMIT_MDEG  65000
+#define FINCAL_V2          2u
+#define FINCAL_V2_RANGE_DEG   180
+#define FINCAL_V2_LIMIT_MDEG  90000
 #define FINCAL_FINS        4u
-#define FINCAL_LIMIT_MDEG  65000           /* +/-65 deg: the neutral pulse stays inside SERVO_MIN..MAX_US (pwm.c) */
+#define FINCAL_LIMIT_MDEG  56000           /* +/-56 deg: the neutral pulse stays inside SERVO_MIN..MAX_US (pwm.c) */
 
 typedef struct {
     bool     valid;
     uint16_t seq;
-    uint8_t  version;                  /* the record it was read from (FINCAL_VERSION_OLD: converted) */
+    uint8_t  version;                  /* the record it was read from (not FINCAL_VERSION: converted) */
     int32_t  off_mdeg[FINCAL_FINS];    /* always at the current scale */
 } FinCal;
 

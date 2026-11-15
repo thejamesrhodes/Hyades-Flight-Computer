@@ -152,7 +152,7 @@ static bool cal_ready_ok(void)
     return (A.cal.s.cal.valid && cal_full_auth()) || (CFG_REQUIRE_FIN_CAL == 0);
 }
 
-/* Millidegrees -> int16 centidegrees for the log event (|zero| <= 65 deg). */
+/* Millidegrees -> int16 centidegrees for the log event (|zero| <= 56 deg). */
 static uint16_t cdeg16(int32_t mdeg) { return (uint16_t)(int16_t)((mdeg >= 0) ? ((mdeg + 5) / 10) : ((mdeg - 5) / 10)); }
 
 /* Millidegrees as a signed decimal with three places (no float printf). */
@@ -1101,9 +1101,10 @@ static void boot(UART_HandleTypeDef *huart)
         Con_Printf("[BOOT] fin zero cal seq %u: %s %s %s %s deg (journal %lu/%lu)\r\n", (unsigned)A.cal.s.cal.seq,
                    fmt_mdeg(b[0], z[0]), fmt_mdeg(b[1], z[1]), fmt_mdeg(b[2], z[2]), fmt_mdeg(b[3], z[3]),
                    (unsigned long)A.cal.s.next, (unsigned long)A.cal.s.slots);
-        if (A.cal.s.cal.version == (uint8_t)FINCAL_VERSION_OLD) {
-            Con_Printf("[BOOT] fin zero read from a 6.667 us/deg record, converted x0.75 (same pulse). "
-                       "Check the alignment, then 'cal begin' / 'cal save' stores it at 8.889 us/deg\r\n");
+        if (A.cal.s.cal.version != (uint8_t)FINCAL_VERSION) {
+            Con_Printf("[BOOT] fin zero read from a version %u record (older servo scale), converted to the same pulse. "
+                       "Check the alignment, then 'cal begin' / 'cal save' stores it at %u deg over %u-%u us\r\n",
+                       (unsigned)A.cal.s.cal.version, (unsigned)FINCAL_RANGE_DEG, (unsigned)SERVO_MIN_US, (unsigned)SERVO_MAX_US);
         }
         if (!cal_full_auth()) {
             Con_Printf("[BOOT] fin zero beyond +/-%lu deg: the servo end stop would clip the authority, READY is held\r\n",

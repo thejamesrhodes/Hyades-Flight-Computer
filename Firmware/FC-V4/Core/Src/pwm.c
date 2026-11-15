@@ -38,7 +38,9 @@ static const PWM_Channel fin_chan[FIN_COUNT] = { PWM_CH3, PWM_CH4, PWM_CH5, PWM_
 _Static_assert((PWM_TIM_CLK_HZ % PWM_TICK_HZ) == 0u, "PWM tick must divide the timer clock");
 _Static_assert((PWM_TICK_HZ % 1000000u) == 0u, "PWM tick must be a whole number of ticks per us");
 _Static_assert(PWM_ARR <= 65535u, "TIM3 is 16-bit: servo period too long for this tick");
-#define SERVO_RANGE_DEG_INT   ((int32_t)SERVO_RANGE_DEG)   /* 135: a whole number of degrees */
+#define SERVO_RANGE_DEG_INT   ((int32_t)SERVO_RANGE_DEG)   /* 116: a whole number of degrees */
+_Static_assert(SERVO_RANGE_DEG_INT == FINCAL_RANGE_DEG,
+               "stored zeros are degrees at SERVO_RANGE_DEG: a new scale needs a new FINCAL_VERSION and its conversion (fincal.c)");
 _Static_assert(FIN_COUNT == FINCAL_FINS, "one calibrated zero per fin");
 _Static_assert(PWM_TICKS_PER_US <= 16u, "zero conversion overflows int32 above 16 ticks/us");
 /* Zero limits against the pulse range. A zero of z mdeg moves the neutral by
@@ -128,9 +130,9 @@ void PWM_SetFinTicks(uint8_t fin_idx, int32_t ticks)
 }
 #endif
 
-/* Millidegrees at the servo -> ticks, rounded: mdeg x 1200 us / 135 deg x
- * ticks/us / 1000. |mdeg| <= 65 000 and <= 16 ticks/us keep every product
- * inside int32 (65 000 x 1200 x 16 = 1.25e9). A zero near the limit leaves
+/* Millidegrees at the servo -> ticks, rounded: mdeg x 1200 us / 116 deg x
+ * ticks/us / 1000. |mdeg| <= 56 000 and <= 16 ticks/us keep every product
+ * inside int32 (56 000 x 1200 x 16 = 1.08e9). A zero near the limit leaves
  * little travel on that side: the app holds READY beyond
  * FIN_ZERO_FULL_AUTH_MDEG for that reason. */
 void PWM_SetZeroMdeg(const int32_t mdeg[FIN_COUNT])

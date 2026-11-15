@@ -295,13 +295,13 @@ class CanardAlignment(unittest.TestCase):
         self.assertEqual(self.dev.phase, "ALIGN")
         self.assertEqual(self.ask("cal jog 0 +0.10")["trial"][0], 0.1)
         self.assertEqual(self.ask("cal jog 0 +10.5")["trial"][0], 0.1)      # over the 10 deg step: refused
-        self.assertEqual(self.ask("cal set 3 -65.5")["trial"][3], 0.0)      # over 65 deg: refused
-        self.assertEqual(self.ask("cal set 2 -30")["trial"][2], -30.0)      # any horn indexing
+        self.assertEqual(self.ask("cal set 3 -56.5")["trial"][3], 0.0)      # over 56 deg: refused
+        self.assertEqual(self.ask("cal set 2 -25")["trial"][2], -25.0)      # any horn indexing
         self.assertTrue(str(self.ask("cal jog 4 0.1")).startswith("usage"))
         time.sleep(1.5)
         self.assertEqual(self.dev.phase, "ALIGN")                           # no timeout, never READY
         c = self.ask("cal save")
-        self.assertEqual((c["state"], c["stored"], c["seq"], c["zero"][2], c["auth"]), ("IDLE", "OK", 1, -30.0, "full"))
+        self.assertEqual((c["state"], c["stored"], c["seq"], c["zero"][2], c["auth"]), ("IDLE", "OK", 1, -25.0, "full"))
         self.assertEqual(self.dev.phase, "SETTLE")
         time.sleep(1.5)
         self.assertEqual(self.dev.phase, "READY")
@@ -347,6 +347,19 @@ class BenchProfiles(unittest.TestCase):
         for p in self.P.PROFILES:
             self.assertEqual(p["frames"], p["halves"] * self.P.LED_HALF)
             self.assertEqual(p["halves"] % 2, 1)                     # lit for the first and the last half period
+
+    def test_14nov_scale_reproduces_the_recorded_table(self):
+        """The 14 Nov 2026 recordings were played at 135 deg; that set must still be the one the board played."""
+        played = {"sync": 0x86A856AC, "stair": 0xB0AE9590, "creep": 0xEA5BB61C, "creepd": 0x1DA05748,
+                  "steps": 0x497E30F9, "sine03": 0x5DB08A26, "sine1": 0x696F39ED, "sine1d": 0x0FF15431,
+                  "sine3": 0x7BBFCF0B, "flight": 0x85C16F9F, "flightn": 0xF2367174}   # bench_profiles.c of 14 Nov
+        try:
+            self.P.use_range(135)
+            self.assertEqual({p["name"]: p["crc"] for p in self.P.PROFILES}, played)
+            self.assertEqual((self.P.TICKS_MAX, self.P.DITHER_TICKS), (2133, 12))
+        finally:
+            self.P.use_range(self.P.RANGE_NOW)
+        self.assertEqual((self.P.RANGE_DEG, self.P.TICKS_MAX, self.P.DITHER_TICKS), (116, 2483, 14))
 
     def test_commands_within_authority_and_end_at_zero(self):
         for p in self.P.PROFILES:

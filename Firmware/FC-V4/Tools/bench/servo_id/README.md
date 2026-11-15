@@ -19,3 +19,5 @@ Keep videos out of git: `Tools/logs/` is ignored.
 
 Changing a profile: edit `profiles.py`, run `python profiles.py --emit`, rebuild and flash, and run `make` and
 `make tools` in `Tests/` (they check the firmware replay against this file).
+
+**Servo scale.** The profiles are PWM ticks at the firmware's `SERVO_RANGE_DEG`: 116 from 15 Nov 2026 (the default), 135 for the 14 Nov 2026 recordings. Pass `--range-deg 135` to `analyse.py`, `fit_servo.py` and `synth.py` for those; `python profiles.py --range 135` lists that set and its CRCs.

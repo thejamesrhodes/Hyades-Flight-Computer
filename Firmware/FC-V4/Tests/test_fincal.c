@@ -26,9 +26,9 @@ static void test_pack_unpack_round_trip(void)
     TEST_ASSERT_EQUAL_UINT16(7, c.seq);
     TEST_ASSERT_EQUAL_INT32(120, c.off_mdeg[0]);
     TEST_ASSERT_EQUAL_INT32(-40, c.off_mdeg[1]);
-    TEST_ASSERT_EQUAL_INT32(-65000, c.off_mdeg[3]);
+    TEST_ASSERT_EQUAL_INT32(-56000, c.off_mdeg[3]);
     TEST_ASSERT_TRUE(FinCal_Within(c.off_mdeg, FINCAL_LIMIT_MDEG));
-    TEST_ASSERT_FALSE(FinCal_Within(c.off_mdeg, 35000));     /* beyond the full-authority zero */
+    TEST_ASSERT_FALSE(FinCal_Within(c.off_mdeg, 26000));     /* beyond the full-authority zero */
 }
 
 /* every single-bit flip in the record is rejected (CRC, magic, version) */
@@ -45,7 +45,7 @@ static void test_any_bit_flip_rejected(void)
     }
 }
 
-/* a well-formed record outside +/-65 deg is not trusted */
+/* a well-formed record outside +/-56 deg is not trusted */
 static void test_out_of_range_rejected(void)
 {
     put(0, 1, FINCAL_LIMIT_MDEG + 1, 0, 0, 0);
@@ -53,33 +53,40 @@ static void test_out_of_range_rejected(void)
     TEST_ASSERT_FALSE(FinCal_Unpack(J, &c));
 }
 
-static void put_v2(uint32_t slot, uint16_t seq, int32_t a, int32_t b, int32_t c, int32_t d)
+static void put_old(uint8_t ver, uint32_t slot, uint16_t seq, int32_t a, int32_t b, int32_t c, int32_t d)
 {
     uint8_t *r = &J[slot * FINCAL_REC_SIZE];
     put(slot, seq, 0, 0, 0, 0);
     const int32_t off[4] = { a, b, c, d };
     for (uint32_t i = 0u; i < 4u; i++) { for (uint32_t k = 0u; k < 4u; k++) { r[8u + (4u * i) + k] = (uint8_t)((uint32_t)off[i] >> (8u * k)); } }
-    r[6] = (uint8_t)FINCAL_VERSION_OLD;
+    r[6] = ver;
     const uint32_t crc = crc32_ieee(r, 28u);
     for (uint32_t k = 0u; k < 4u; k++) { r[28u + k] = (uint8_t)(crc >> (8u * k)); }
 }
 
-/* a version-2 record holds zeros aligned at the old 6.667 us/deg scale: it is
- * read and converted x 3/4 (the same pulse), so the alignment survives the
- * scale correction (REVIEW-01 F1) */
+static void put_v2(uint32_t slot, uint16_t seq, int32_t a, int32_t b, int32_t c, int32_t d) { put_old(FINCAL_V2, slot, seq, a, b, c, d); }
+static void put_v3(uint32_t slot, uint16_t seq, int32_t a, int32_t b, int32_t c, int32_t d) { put_old(FINCAL_V3, slot, seq, a, b, c, d); }
+
+/* the pulse offset of a zero in ps: mdeg x 1200 us / range x 1000 */
+static int64_t pulse_ps(int32_t mdeg, int32_t range) { return ((int64_t)mdeg * 1200 * 1000) / range; }
+
+/* a version-2 record holds zeros aligned at 6.667 us/deg (range 180): it is
+ * read and converted x 116/180 (the same pulse, to half a millidegree), so the
+ * alignment survives the scale corrections (REVIEW-01 F1, BENCH-02 section 11) */
 static void test_old_version_converted(void)
 {
     put_v2(0, 5, 100, -24000, 86000, -1);
     FinCal c;
     TEST_ASSERT_TRUE(FinCal_Unpack(J, &c));
-    TEST_ASSERT_EQUAL_UINT8(FINCAL_VERSION_OLD, c.version);
+    TEST_ASSERT_EQUAL_UINT8(FINCAL_V2, c.version);
     TEST_ASSERT_EQUAL_UINT16(5, c.seq);
-    TEST_ASSERT_EQUAL_INT32(75, c.off_mdeg[0]);
-    TEST_ASSERT_EQUAL_INT32(-18000, c.off_mdeg[1]);
-    TEST_ASSERT_EQUAL_INT32(64500, c.off_mdeg[2]);
-    TEST_ASSERT_EQUAL_INT32(-1, c.off_mdeg[3]);              /* -0.75 rounds to -1 */
-    /* same pulse: mdeg x 1200 us / range, old 180 deg against new 135 deg */
-    TEST_ASSERT_EQUAL_INT32(-24000 * 1200 / 180, c.off_mdeg[1] * 1200 / 135);
+    TEST_ASSERT_EQUAL_INT32(64, c.off_mdeg[0]);              /* 64.44 */
+    TEST_ASSERT_EQUAL_INT32(-15467, c.off_mdeg[1]);          /* -15466.67 */
+    TEST_ASSERT_EQUAL_INT32(55422, c.off_mdeg[2]);           /* 55422.2 */
+    TEST_ASSERT_EQUAL_INT32(-1, c.off_mdeg[3]);              /* -0.64 rounds to -1 */
+    /* same pulse to within half a millidegree at the new scale (5.2 ns = 5200 ps) */
+    TEST_ASSERT_INT64_WITHIN(5200, pulse_ps(-24000, 180), pulse_ps(c.off_mdeg[1], FINCAL_RANGE_DEG));
+    TEST_ASSERT_INT64_WITHIN(5200, pulse_ps(86000, 180), pulse_ps(c.off_mdeg[2], FINCAL_RANGE_DEG));
     /* a newer save wins and reads back as the current version */
     put(1, 6, 10, 20, 30, 40);
     FinCalScan s;
@@ -90,16 +97,34 @@ static void test_old_version_converted(void)
     TEST_ASSERT_EQUAL_UINT32(0, s.bad);
 }
 
-/* an old zero that converts to beyond +/-65 deg, or is outside the old +/-90
+/* a version-3 record (8.889 us/deg, range 135, 10-15 Nov 2026) is converted
+ * x 116/135: the same pulse */
+static void test_v3_converted(void)
+{
+    put_v3(0, 9, 135, -65000, 21000, -2);
+    FinCal c;
+    TEST_ASSERT_TRUE(FinCal_Unpack(J, &c));
+    TEST_ASSERT_EQUAL_UINT8(FINCAL_V3, c.version);
+    TEST_ASSERT_EQUAL_INT32(116, c.off_mdeg[0]);
+    TEST_ASSERT_EQUAL_INT32(-55852, c.off_mdeg[1]);          /* -55851.85 */
+    TEST_ASSERT_EQUAL_INT32(18044, c.off_mdeg[2]);           /* 18044.4 */
+    TEST_ASSERT_EQUAL_INT32(-2, c.off_mdeg[3]);              /* -1.72 */
+    TEST_ASSERT_INT64_WITHIN(5200, pulse_ps(-65000, 135), pulse_ps(c.off_mdeg[1], FINCAL_RANGE_DEG));
+    TEST_ASSERT_TRUE(FinCal_InRange(c.off_mdeg));             /* every v3 zero fits the new limit */
+    put_v3(0, 9, 65001, 0, 0, 0);                            /* outside the v3 limit */
+    TEST_ASSERT_FALSE(FinCal_Unpack(J, &c));
+}
+
+/* an old zero that converts to beyond +/-56 deg, or is outside the old +/-90
  * deg, is not trusted; an unknown version is not read */
 static void test_old_version_out_of_range_rejected(void)
 {
     FinCal c;
-    put_v2(0, 1, 90000, 0, 0, 0);                            /* 67.5 deg at the new scale */
+    put_v2(0, 1, 90000, 0, 0, 0);                            /* 58 deg at the new scale */
     TEST_ASSERT_FALSE(FinCal_Unpack(J, &c));
     put_v2(0, 1, 0, 0, -90001, 0);
     TEST_ASSERT_FALSE(FinCal_Unpack(J, &c));
-    put_v2(0, 1, 0, 0, 0, 2000000000);                       /* would overflow x 3: refused first */
+    put_v2(0, 1, 0, 0, 0, 2000000000);                       /* would overflow the multiply: refused first */
     TEST_ASSERT_FALSE(FinCal_Unpack(J, &c));
     put_v2(0, 1, 1, 2, 3, 4);
     J[6] = 1u;                                               /* version 1: CRC now wrong as well */
@@ -164,6 +189,7 @@ int main(void)
     RUN_TEST(test_any_bit_flip_rejected);
     RUN_TEST(test_out_of_range_rejected);
     RUN_TEST(test_old_version_converted);
+    RUN_TEST(test_v3_converted);
     RUN_TEST(test_old_version_out_of_range_rejected);
     RUN_TEST(test_empty_journal);
     RUN_TEST(test_newest_wins_torn_skipped);

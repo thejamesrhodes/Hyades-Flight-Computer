@@ -1,6 +1,6 @@
 # CAL-01 — Canard zero alignment (firmware and ground station)
 
-**Status:** implemented 9 Nov 2026. Revised 9 Nov: dedicated ALIGN phase (enterable from READY), zero range ±90°, no timeout. Revised 10 Nov: servo scale corrected to 8.889 µs/° (§9), so the zero range is ±65°, full authority needs ±35°, and records are version 3. Host tests, simulator end-to-end tests and the target build all pass. **Not yet run on the board** (§8).
+**Status:** implemented 9 Nov 2026. Revised 9 Nov: dedicated ALIGN phase (enterable from READY), zero range ±90°, no timeout. Revised 10 Nov: servo scale corrected to 8.889 µs/° (§9), so the zero range is ±65°, full authority needs ±35°, and records are version 3. **Revised 15 Nov: servo scale measured at 10.34 µs/° (§10): zero range ±56°, full authority within ±26°, records version 4.** Host tests, simulator end-to-end tests and the target build all pass. **Not yet run on the board** (§8).
 
 **Why.** A 0.5–3° zero error on one canard costs +27 % coast roll RMS p95 and pushes the worst peak roll past the 240 °/s requirement (ALLOC-01 §4). Servo spline indexing and linkage set each canard's zero, so it has to be measured on the assembled vehicle, not set in the code.
 
@@ -12,8 +12,8 @@
 
 **Revision (9 Nov):**
 - a session puts the board in its own phase, **ALIGN**, entered from SETTLING or READY and left only by save or cancel (both to SETTLING, so the full READY hold runs again), a HARD fault (LOCKOUT) or liftoff (BOOST, the T9 rule). No timeout;
-- any zero within ±65° (the servo travel from neutral; ±90° until the 10 Nov scale correction) can be stored, so horn indexing on the spline can be taken out in software;
-- READY is held while any stored zero is beyond ±35° (±60° until 10 Nov), where the pulse limit would clip the ±30° command authority.
+- any zero within ±56° (the servo travel from neutral; ±90° until 10 Nov, ±65° until 15 Nov) can be stored, so horn indexing on the spline can be taken out in software;
+- READY is held while any stored zero is beyond ±26° (±60° until 10 Nov, ±35° until 15 Nov), where the pulse limit would clip the ±30° command authority.
 
 ## 1. Design
 
@@ -22,7 +22,7 @@
 | Record and journal format | `Core/hyades/svc/fincal.c/.h` | 32-byte record with magic, sequence number, version and CRC-32. Scans for the newest valid record. Pure, host-tested. |
 | Alignment session | `Core/hyades/mission/align.c/.h` | Phase gating, limits, session end on phase exit, angle parser. Pure, host-tested. |
 | Flash storage | `Core/Src/calstore.c/.h` | Appends records to the journal and rewrites it after a log erase. |
-| PWM zero | `Core/Src/pwm.c` | `PWM_SetZeroMdeg`: millidegrees to whole ticks, clamped to ±65°. The only way the zero changes. |
+| PWM zero | `Core/Src/pwm.c` | `PWM_SetZeroMdeg`: millidegrees to whole ticks, clamped to ±56°. The only way the zero changes. |
 | ALIGN phase | `Core/hyades/mission/phase.c`, `detect.c`, `flight.c` | `PH_ALIGN`: allowed edges SETTLING/READY → ALIGN → SETTLING, BOOST, LOCKOUT (STM-01 T17, T18). Liftoff detection runs in ALIGN. |
 | Integration | `Core/Src/app.c` | `cal` command, READY inhibit, log event, status token, boot report. |
 | Ground station | `Tools/fc_console.py` (Canards tab, Ctrl+4), `fc_link.py`, `fc_sim.py`, `fc_pull.py` | Operator UI, reply parser, simulator, log decode. |
@@ -35,7 +35,7 @@
 
 **Storage.**
 - The journal is 4 KB at the start of log sector 5, which is 128 records.
-- Records are version 3: int32 millidegree zeros at 8.889 µs/°. Version 2 records (zeros at the earlier 6.667 µs/°) are still read and converted × 3/4, which is the same pulse, so an alignment made before the scale correction holds. v1 int16 records are not read.
+- Records are version 4: int32 millidegree zeros at 10.34 µs/° (§10). Version 3 (8.889 µs/°) and version 2 (6.667 µs/°) records are still read and converted × 116/135 and × 116/180, which is the same pulse, so an alignment made before a scale correction holds. v1 int16 records are not read.
 - A save appends one record: 8 word writes, with the CPU stalled about 0.13 ms. It never erases.
 - The newest valid record wins. A torn or foreign record is skipped and never trusted.
 - A firmware update only erases sectors 0–4, so the calibration survives reflashing.
@@ -50,8 +50,8 @@
 | Ignition during a session | Liftoff is detected in ALIGN and sequenced to BOOST (T9), the session ends and the stored zero is restored before that frame's PWM write. The log starts as in F3. | `detect.c`, `Align_Poll` |
 | A session left half-done | The board stays in ALIGN, fins static, READY unreachable, until save or cancel. A USB unplug changes nothing; reconnect and carry on. A power cycle discards the trial (RAM only). Only an explicit save keeps the trial values. No timeout, so the phase can never drift into READY unattended. | `Align_Poll`, `phase.c` |
 | READY reached straight after a session | Save and cancel go to SETTLING, and the READY hold counter is cleared on every SETTLING entry (STM-01 F4). | `Flight_GoPhase` |
-| A zero so large the ±30° command clips at the pulse limit | READY held while any |zero| > 35°; status shows `cal=CLIPPED`, the boot report warns. | `cal_ready_ok()` |
-| A wild value from a typo or a corrupt link | Each jog is limited to ±10° and each zero to ±65°. Out-of-range input is refused, not clamped. Angles are parsed as integers, with no float parsing. | `Align_Jog/Set/ParseMdeg` |
+| A zero so large the ±30° command clips at the pulse limit | READY held while any |zero| > 26°; status shows `cal=CLIPPED`, the boot report warns. | `cal_ready_ok()` |
+| A wild value from a typo or a corrupt link | Each jog is limited to ±10° and each zero to ±56°. Out-of-range input is refused, not clamped. Angles are parsed as integers, with no float parsing. | `Align_Jog/Set/ParseMdeg` |
 | A corrupt or torn calibration used in flight | CRC-32 plus magic, version and range checks on every read. After a save, the record is read back from flash before it is used. | `FinCal_Unpack`, `CalStore` |
 | Flying uncalibrated | READY is held while no valid record exists (`CFG_REQUIRE_FIN_CAL 1`). The flight build fails to compile with it off. | `board.h`, `app.c` |
 | Not knowing what flew | The calibration is written into every flight log at arming, as an `EV_CAL` event. `fc_pull.py` decodes it. | `log_cal()` |
@@ -63,12 +63,12 @@
 cal                     show
 cal begin               enter ALIGN (from SETTLING or READY, no HARD fault)
 cal jog <fin> <deg>     nudge one canard's trial zero, |deg| <= 10
-cal set <fin> <deg>     set it outright, |deg| <= 65
+cal set <fin> <deg>     set it outright, |deg| <= 56
 cal save                store the trial zeros, return to SETTLING
 cal cancel              restore the stored zeros, return to SETTLING
 ```
 
-Fins: 0 top, 1 right, 2 bottom, 3 left. Angles are in degrees at the servo, up to 3 decimals. One 8 MHz PWM tick is 0.014°.
+Fins: 0 top, 1 right, 2 bottom, 3 left. Angles are in degrees at the servo, up to 3 decimals. One 8 MHz PWM tick is 0.012°.
 
 Every reply ends with one machine-readable line:
 
@@ -76,14 +76,14 @@ Every reply ends with one machine-readable line:
 CAL state=ALIGN stored=OK seq=3 zero=+0.120,-0.040,+0.000,+0.310 trial=+0.140,-0.040,+0.000,+0.310 journal=3/128 auth=full ready=held
 ```
 
-`auth` is `full` when every zero is within ±35°, else `clipped`. The 5 Hz status line ends with `cal=OK|NONE|ALIGN|CLIPPED`. Zeros are logged in the `EV_CAL` event as int16 centidegrees.
+`auth` is `full` when every zero is within ±26°, else `clipped`. The 5 Hz status line ends with `cal=OK|NONE|ALIGN|CLIPPED`. Zeros are logged in the `EV_CAL` event as int16 centidegrees.
 
 ## 4. Procedure (PLAN-01 G4)
 
 1. Fit the alignment jig or laser line to each canard root. Restrain the airframe and keep the fin arc clear.
 2. Power the flight computer, connect the ground station and wait for SETTLE or READY.
 3. Open the Canards tab (Ctrl+4) and press Begin session. The phase shows ALIGN. The canards hold the stored zero, or 0 if none is stored.
-4. Jog each canard onto its reference. Use Set or ±10° for a coarse offset (horn indexing), ±1° and ±0.1° to get close, then ±0.02° (1.4 ticks). Offsets beyond ±35° hold READY: refit the horn instead.
+4. Jog each canard onto its reference. Use Set or ±10° for a coarse offset (horn indexing), ±1° and ±0.1° to get close, then ±0.02° (1.7 ticks). Offsets beyond ±26° hold READY: refit the horn instead.
    - **Bench note, 10 Nov (BENCH-01 rev 2):** the servo takes a new target only after a 2.0 µs change, which is 0.225° or 12 of the ±0.02° jogs, and lands about ±0.15° from it. Finish with ±0.1° jogs from one side and expect about ±0.2°.
 5. Press Save and check the before and after table in the confirmation. The board returns to SETTLING and reaches READY after the full hold; the tab shows the stored sequence number and READY allowed.
 6. Re-check by power-cycling. The boot line prints the stored zeros, and the canards return to the jig line.
@@ -105,8 +105,8 @@ CAL state=ALIGN stored=OK seq=3 zero=+0.120,-0.040,+0.000,+0.310 trial=+0.140,-0
 
 | Check | Result |
 |---|---|
-| `test_fincal` | 9 tests: version 2 record converted × 3/4 to the same pulse; old record out of range rejected; round trip; every single-bit flip rejected; range; empty journal; torn record skipped; foreign data reported full and invalid; append position |
-| `test_align` | 6 tests: phase and fault gating; no command without a session; 10° step and 65° range refusal; save keeps, cancel reverts; each phase exit ends the session (fault, liftoff, other); no timeout over 100 000 polls; parser accept and reject table |
+| `test_fincal` | 10 tests: version 3 and version 2 records converted × 116/135 and × 116/180 to the same pulse; old record out of range rejected; round trip; every single-bit flip rejected; range; empty journal; torn record skipped; foreign data reported full and invalid; append position |
+| `test_align` | 6 tests: phase and fault gating; no command without a session; 10° step and 56° range refusal; save keeps, cancel reverts; each phase exit ends the session (fault, liftoff, other); no timeout over 100 000 polls; parser accept and reject table |
 | `test_phase`, `test_detect`, `test_flight` | ALIGN edges allowed and refused; liftoff from ALIGN; ALIGN holds READY, save returns through the full hold, liftoff from ALIGN sequenced (fails without the F4 fix) |
 | Full host suite | 15 suites pass |
 | `test_tools.py` | `CanardAlignment`: parser, status token, simulator session (ALIGN from SETTLE and READY, no timeout, 10°/90° limits, save and cancel return through SETTLE, clipped zero holds READY). 16 tests pass. |
@@ -142,3 +142,15 @@ CAL state=ALIGN stored=OK seq=3 zero=+0.120,-0.040,+0.000,+0.310 trial=+0.140,-0
 - **Stored calibrations.** A version 2 record is converted × 3/4 when read. The pulse, and so the canard position found at alignment, is unchanged. The boot report says so, and the next save writes version 3.
 - **On the board.** Build `75638673+01b712` flashed over USB on 10 Nov: the stored version 2 record (all zeros) was read and converted, and READY was reached.
 - **Still to check by hand:** a 10° jog is 10° at the canard.
+
+## 10. Servo scale measured, 15 Nov 2026
+
+- **Finding (BENCH-02 §11).** At 8.889 µs/° (135) fin 2 turned 0.861 (+0.03/−0.015) of the command, measured on the hub. The servo is about 10.3 µs/°. The maker's 90° for 1100–1900 µs does not hold for this servo, and the 10 Nov hand check (0.75 at 6.667 µs/°, §9) is not confirmed: this measurement predicts 0.645 there.
+- **Change.** `SERVO_RANGE_DEG` is 116, 10.34 µs/°. A command of 30° is 310.3 µs (2 483 ticks); one tick is 0.012°.
+- **Zero limits.** The travel to the nearer pulse limit, 580 µs, is 56.07°:
+  - largest storable zero ±56° (`FINCAL_LIMIT_MDEG`);
+  - full ±30° authority with a zero within ±26° (`FIN_ZERO_FULL_AUTH_MDEG`);
+  - both checked at compile time in `pwm.c`, which also checks that `FINCAL_RANGE_DEG` (the scale of the stored record) equals `SERVO_RANGE_DEG`.
+- **Stored calibrations.** Version 4. A version 3 record is read × 116/135 and a version 2 record × 116/180, rounded to the nearest millidegree: the same pulse to within 5 ns. Every version 3 zero fits (±65° becomes ±55.85°). A version 3 zero between ±30.3° and ±35° passed the old full-authority check but now holds READY: a true ±30° command is 310 µs, not the old 267 µs, so less of the 580 µs is left for the zero. The boot report says when a record was converted, and the next save writes version 4.
+- **On the board.** Build `a5dc2489+1093e7` flashed over USB on 15 Nov: the stored version 3 record (fin 2 −15.500°) read as −13.319°, both 137.8 µs below centre. READY reached.
+- **To do:** re-align and save (the converted zero is the same pulse, so this only rewrites the record); check that 10° is 10° at the canard.

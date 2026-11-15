@@ -55,21 +55,26 @@ def sample(rng, motor, a):
                  sv_db=0.0,                      # no separate error dead zone seen
                  sv_wn=U(110, 150), sv_zeta=U(0.75, 0.85),   # small steps 130 rad/s (IQR 116-151), zeta 0.80
                  sv_lash=U(0.0015, 0.0038))      # 0.135 deg bare servo; flight-like drive not yet measurable
-    if a.servo == "bench02":
+    if a.servo in ("bench02", "bench02_135"):
         # BENCH-02 (14 Nov 2026): joint fit of steps, sines, creep and a flight replay, fin 2 on USB 5 V
-        # (fit_servo.py), in TRUE canard angle. BENCH-02 section 11 (hub video, 15 Nov): the canard turns
-        # 0.86 (+0.03/-0.015) of the command at SERVO_RANGE_DEG 135, so the laser-run angles (calibrated
-        # as if command = true) are x0.86 here. sv_sod stays in command units (the servo input threshold,
-        # 1.6 us). sv_tau: 9.3 ms from pulse start less the 1.5 ms pulse read (in sv_extra) and 0-2.5 ms of
-        # camera rolling shutter. Set sv_gain=1 once the firmware scale is corrected.
-        d.update(sv_sod=U(0.0029, 0.0034),      # 0.165-0.195 deg of command (fit 0.181)
+        # (fit_servo.py). BENCH-02 section 11 (hub video, 15 Nov): at SERVO_RANGE_DEG 135 the canard turned
+        # 0.861 (+0.03/-0.015) of the command, so the laser-run angles (calibrated as if command = true) are
+        # x0.86 in true angle: sv_land, sv_rate and sv_lash below. sv_tau: 9.3 ms from pulse start less the
+        # 1.5 ms pulse read (in sv_extra) and 0-2.5 ms of camera rolling shutter.
+        #   bench02      the firmware from 15 Nov (SERVO_RANGE_DEG 116, 10.34 us/deg): the command is the true
+        #                angle to the measurement's uncertainty, sv_gain 0.983-1.036; the 1.6 us input
+        #                threshold is 0.142-0.168 deg of command.
+        #   bench02_135  the firmware of 10-15 Nov (135, 8.889 us/deg), as built when measured: sv_gain
+        #                0.845-0.89, threshold 0.165-0.195 deg of command.
+        old = a.servo == "bench02_135"
+        d.update(sv_sod=U(0.0029, 0.0034) if old else U(0.00249, 0.00292),   # 1.6 us (fit 0.181 deg at 135)
                  sv_land=U(0.0015, 0.0028),      # landing scatter 0.085-0.16 deg sd, true
                  sv_db=0.0,
                  sv_tau=U(0.0053, 0.0078),
                  sv_wn=U(120, 140), sv_zeta=U(0.72, 0.80),
                  sv_rate=U(7.7, 12.4), sv_volt_k=1.0,   # 440-710 deg/s true at the bench supply
                  sv_lash=U(0.0018, 0.0023),      # 0.10-0.13 deg true (fit 0.139 x 0.86)
-                 sv_gain=U(0.845, 0.89))         # true canard angle per commanded angle
+                 sv_gain=U(0.845, 0.89) if old else U(0.983, 1.036))   # true canard angle per commanded angle
     for kv in a.set:
         k, v = kv.split("=", 1); d[k] = float(v) if v.replace(".", "", 1).replace("-", "", 1).isdigit() else v
     return d
@@ -145,7 +150,7 @@ def main():
     ap.add_argument("--fin1_sd", type=float, default=0.2, help="single-fin misalignment 1-sigma, deg")
     ap.add_argument("--bear_max", type=float, default=0.012, help="bearing Coulomb torque upper bound, N m")
     ap.add_argument("--seed0", type=int, default=1000)
-    ap.add_argument("--servo", default="legacy", choices=["legacy", "bench01", "bench02"],
+    ap.add_argument("--servo", default="legacy", choices=["legacy", "bench01", "bench02", "bench02_135"],
                     help="legacy = datasheet model (MC-01 A17-A21); bench01 = measured input stage and dynamics (BENCH-01)")
     ap.add_argument("--set", action="append", default=[], help="key=value fixed override")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)

@@ -537,7 +537,10 @@ def main():
     ap.add_argument("tracks", nargs="+")
     ap.add_argument("--cal")
     ap.add_argument("--no-fig", action="store_true")
+    ap.add_argument("--range-deg", type=int, default=P.RANGE_NOW, choices=sorted(P.RANGES),
+                    help="servo scale the recording was played at (SERVO_RANGE_DEG): 135 for the 14 Nov 2026 recordings")
     a = ap.parse_args()
+    P.use_range(a.range_deg)
     # a stair run first, so that its cal.json serves the others
     def is_stair(f):
         d = np.load(f); led, _, _ = find_led(d["cells"], d["pts"], d["cmax"] if "cmax" in d else None)

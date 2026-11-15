@@ -25,9 +25,9 @@ import random
 BUILD = "sim0000"
 LOG_CAP = 384 * 1024 - 4096            # CAL-01: 4 KB calibration journal ahead of the log
 CAL_SLOTS = 128
-CAL_LIMIT = 65.0                       # deg, servo travel from neutral at 8.889 us/deg (FINCAL_LIMIT_MDEG)
+CAL_LIMIT = 56.0                       # deg, servo travel from neutral at 10.34 us/deg (FINCAL_LIMIT_MDEG)
 CAL_STEP = 10.0                        # deg, largest single jog
-CAL_FULL_AUTH = 35.0                   # deg, FIN_ZERO_FULL_AUTH_MDEG: beyond this READY is held
+CAL_FULL_AUTH = 26.0                   # deg, FIN_ZERO_FULL_AUTH_MDEG: beyond this READY is held
 REC = 48
 
 
@@ -324,7 +324,7 @@ class SimDevice:
             else:
                 new = round(self.trial[i] + v if sub == "jog" else v, 3)
                 if abs(new) > CAL_LIMIT:
-                    err = "zero outside +/-65 deg (the servo travel from neutral)"
+                    err = "zero outside +/-56 deg (the servo travel from neutral)"
                 else:
                     self.trial[i] = new
         elif sub == "save":

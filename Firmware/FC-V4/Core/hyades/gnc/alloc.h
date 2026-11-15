@@ -31,9 +31,10 @@
 #include <stdbool.h>
 #include "board.h"
 
-/* PWM ticks per normalised fin unit: 30 deg x 8.889 us/deg x ticks/us
- * (266.7 at a 1 MHz tick, 2133.3 at 8 MHz: not a whole number, the quantiser
- * rounds). One tick is 1/ALLOC_TICKS_PER_NORM. */
+/* PWM ticks per normalised fin unit: 30 deg x 10.34 us/deg x ticks/us
+ * (310.3 at a 1 MHz tick, 2482.8 at 8 MHz: not a whole number, the quantiser
+ * rounds, so full authority may be up to half a tick, 0.006 deg, over). One
+ * tick is 1/ALLOC_TICKS_PER_NORM. */
 #define ALLOC_US_PER_DEG     ((float)(SERVO_MAX_US - SERVO_MIN_US) / SERVO_RANGE_DEG)
 #define ALLOC_TICKS_PER_NORM (FIN_DEFLECT_DEG * ALLOC_US_PER_DEG * (float)PWM_TICKS_PER_US)
 

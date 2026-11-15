@@ -47,18 +47,26 @@ bool FinCal_Unpack(const uint8_t in[FINCAL_REC_SIZE], FinCal *out)
     out->version = 0u;
     const uint8_t ver = in[OFF_VER];
     if (get_u32(&in[OFF_MAGIC]) != FINCAL_MAGIC) { return false; }
-    if ((ver != (uint8_t)FINCAL_VERSION) && (ver != (uint8_t)FINCAL_VERSION_OLD)) { return false; }
+    int32_t old_range = 0;
+    int32_t old_lim = 0;
+    if (ver == (uint8_t)FINCAL_V3) { old_range = FINCAL_V3_RANGE_DEG; old_lim = FINCAL_V3_LIMIT_MDEG; }
+    else if (ver == (uint8_t)FINCAL_V2) { old_range = FINCAL_V2_RANGE_DEG; old_lim = FINCAL_V2_LIMIT_MDEG; }
+    else if (ver != (uint8_t)FINCAL_VERSION) { return false; }
+    else { /* current scale */ }
     if (in[OFF_COUNT] != (uint8_t)FINCAL_FINS) { return false; }
     if (get_u32(&in[OFF_CRC]) != crc32_ieee(in, OFF_CRC)) { return false; }
     int32_t off[FINCAL_FINS];
     for (uint32_t i = 0u; i < FINCAL_FINS; i++) { off[i] = (int32_t)get_u32(&in[OFF_FINS + (4u * i)]); }
-    if (ver == (uint8_t)FINCAL_VERSION_OLD) {
-        /* Old-scale degrees x 6.667 / 8.889 = x 3/4: the pulse, and so the canard
-         * position found at alignment, is unchanged. Range-checked before the
-         * multiply (|x| <= 90 000, x 3 fits int32), rounded to nearest. */
-        if (!FinCal_Within(off, FINCAL_LIMIT_OLD_MDEG)) { return false; }
+    if (old_range != 0) {
+        /* Degrees at an older scale x FINCAL_RANGE_DEG / old range: the pulse, and so
+         * the canard position found at alignment, is unchanged. Range-checked before
+         * the multiply (|x| <= 90 000, x 2 x 116 fits int32), rounded half away from
+         * zero. */
+        if (!FinCal_Within(off, old_lim)) { return false; }
+        const int32_t den = 2 * old_range;
         for (uint32_t i = 0u; i < FINCAL_FINS; i++) {
-            off[i] = (off[i] >= 0) ? (((off[i] * 3) + 2) / 4) : -((((-off[i]) * 3) + 2) / 4);
+            const int32_t num = 2 * off[i] * (int32_t)FINCAL_RANGE_DEG;
+            off[i] = (num >= 0) ? ((num + old_range) / den) : -(((-num) + old_range) / den);
         }
     }
     if (!FinCal_InRange(off)) { return false; }

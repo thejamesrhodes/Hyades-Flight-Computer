@@ -8,7 +8,9 @@ analysis, so the command behind every video frame is known exactly.
     python profiles.py --emit      rewrite Core/hyades/svc/bench_profiles.c (then rebuild and flash)
 
 Units: a profile is written in degrees at the canard and seconds; the table holds PWM ticks about the
-fin's zero (9600 ticks over 135 deg = 71.11 ticks/deg, 0.0141 deg/tick) and 200 Hz frames.
+fin's zero and 200 Hz frames. The ticks depend on the servo scale, 9600 ticks over RANGE_DEG: 116 deg
+from 15 Nov 2026 (82.76 ticks/deg, 0.0121 deg/tick). The 14 Nov 2026 recordings were played at 135 deg
+(71.11 ticks/deg): analyse them with --range-deg 135 (use_range).
 
 Timing of one run (frames):
     PRE  300   fins at 0, both board LEDs off
@@ -27,10 +29,14 @@ import math, os, sys, zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FRAME_HZ = 200
-TICKS_PER_DEG = 9600.0 / 135.0      # board.h: (SERVO_MAX_US - SERVO_MIN_US) x PWM_TICKS_PER_US / SERVO_RANGE_DEG
+SPAN_TICKS = 9600                   # board.h: (SERVO_MAX_US - SERVO_MIN_US) x PWM_TICKS_PER_US
+RANGE_NOW = 116                     # board.h SERVO_RANGE_DEG from 15 Nov 2026 (BENCH-02 section 11)
+RANGES = {116: "firmware from 15 Nov 2026", 135: "firmware of 10-15 Nov 2026 (the 14 Nov 2026 recordings)"}
+CSV_RANGE = 135                     # flight_cmd.csv's ticks were written at this scale
+DITHER_RAD = 1.5 * 0.00196          # board.h CTRL_DITHER_AMP_RAD (true angle)
 PRE, POST, LED_HALF = 300, 300, 97
-DITHER_TICKS, DITHER_HALF = 12, 2   # flight dither: +/-1.5 us, 50 Hz square (CTRL_DITHER_*)
-TICKS_MAX = 2133                    # 30 deg
+DITHER_HALF = 2                     # flight dither: 50 Hz square (CTRL_DITHER_PERIOD_N 4)
+RANGE_DEG = TICKS_PER_DEG = DITHER_TICKS = TICKS_MAX = None   # set by use_range()
 MOVE, SINE, TABLE = 0, 1, 2
 F_DITHER = 1
 SIN_Q = [int(round(32767 * math.sin(0.5 * math.pi * k / 256))) for k in range(257)]
@@ -62,15 +68,14 @@ def sine(amp_deg, period, cycles, dither=False):
 def flight_table():
     with open(os.path.join(HERE, "flight_cmd.csv")) as f:
         k = [int(l) for l in f if l.strip() and not l.startswith("#")]
+    k = [int(round(v * CSV_RANGE / RANGE_DEG)) for v in k]    # same angle at this scale
     d = [b - a for a, b in zip([0] + k[:-1], k)]
     assert all(-128 <= v <= 127 for v in d)
     return d
 
 
-TABLES = [flight_table()]
-
-# Every profile but 'sync' starts with this: three known levels, used to tie the picture to angle.
-HDR = [hold(0, 0.5), hold(10, 0.4), hold(-10, 0.4), hold(0, 0.5)]
+# Every profile but 'sync' starts with HDR: three known levels, used to tie the picture to angle.
+TABLES = HDR = None   # set by use_range()
 SINE_PERIODS = [200, 100, 66, 40, 28, 20, 14, 10, 8, 6, 5]      # 1, 2, 3, 5, 7.1, 10, 14.3, 20, 25, 33.3, 40 Hz
 
 
@@ -109,19 +114,20 @@ def p_flight(d):
 
 
 # name, segments, what it is for. The order is the profile id; append, never reorder.
-RAW = [
-    ("sync",    p_sync(),          "no motion: check the LEDs are seen"),
-    ("stair",   p_stair(),         "levels to +/-12 deg in 1.5 deg steps (twice) and +/-30 in 5: static map, lash, picture scale"),
-    ("creep",   p_creep(False),    "0.4 deg/s triangle to +/-2 deg: the threshold the servo ignores"),
-    ("creepd",  p_creep(True),     "the same with the flight dither"),
-    ("steps",   p_steps(),         "steps of 0.1 to 30 deg both ways: dead time, rise, rate limit"),
-    ("sine03",  p_sine(0.3, False), "0.3 deg sines, 1 to 40 Hz"),
-    ("sine1",   p_sine(1.0, False), "1 deg sines, 1 to 40 Hz"),
-    ("sine1d",  p_sine(1.0, True),  "1 deg sines with the flight dither"),
-    ("sine3",   p_sine(3.0, False), "3 deg sines, 1 to 40 Hz"),
-    ("flight",  p_flight(True),    "6 s of a simulated flight's roll command, with dither (as flown)"),
-    ("flightn", p_flight(False),   "the same command without dither"),
-]
+def raw():
+    return [
+        ("sync",    p_sync(),          "no motion: check the LEDs are seen"),
+        ("stair",   p_stair(),         "levels to +/-12 deg in 1.5 deg steps (twice) and +/-30 in 5: static map, lash, picture scale"),
+        ("creep",   p_creep(False),    "0.4 deg/s triangle to +/-2 deg: the threshold the servo ignores"),
+        ("creepd",  p_creep(True),     "the same with the flight dither"),
+        ("steps",   p_steps(),         "steps of 0.1 to 30 deg both ways: dead time, rise, rate limit"),
+        ("sine03",  p_sine(0.3, False), "0.3 deg sines, 1 to 40 Hz"),
+        ("sine1",   p_sine(1.0, False), "1 deg sines, 1 to 40 Hz"),
+        ("sine1d",  p_sine(1.0, True),  "1 deg sines with the flight dither"),
+        ("sine3",   p_sine(3.0, False), "3 deg sines, 1 to 40 Hz"),
+        ("flight",  p_flight(True),    "6 s of a simulated flight's roll command, with dither (as flown)"),
+        ("flightn", p_flight(False),   "the same command without dither"),
+    ]
 
 
 def sin_q15(idx):
@@ -176,9 +182,25 @@ def build():
     return profs
 
 
-PROFILES = build()
-BY_NAME = {p["name"]: p for p in PROFILES}
-BY_HALVES = {p["halves"]: p for p in PROFILES}
+def use_range(range_deg):
+    """Build every profile at a servo scale (SERVO_RANGE_DEG over the 9600-tick span). The firmware plays the
+    RANGE_NOW set; RANGES lists the scales that recordings were made at."""
+    global RANGE_DEG, TICKS_PER_DEG, DITHER_TICKS, TICKS_MAX, TABLES, HDR, RAW, PROFILES, BY_NAME, BY_HALVES
+    if int(range_deg) not in RANGES:
+        raise ValueError(f"servo scale {range_deg} deg: known {sorted(RANGES)}")
+    RANGE_DEG = int(range_deg)
+    TICKS_PER_DEG = SPAN_TICKS / float(RANGE_DEG)
+    DITHER_TICKS = int(round(math.degrees(DITHER_RAD) * TICKS_PER_DEG))   # 14 at 116 (+/-1.75 us), 12 at 135
+    TICKS_MAX = int(round(30.0 * TICKS_PER_DEG))                          # 30 deg: 2483 at 116, 2133 at 135
+    TABLES = [flight_table()]
+    HDR = [hold(0, 0.5), hold(10, 0.4), hold(-10, 0.4), hold(0, 0.5)]
+    RAW = raw()
+    PROFILES = build()
+    BY_NAME = {p["name"]: p for p in PROFILES}
+    BY_HALVES = {p["halves"]: p for p in PROFILES}
+
+
+use_range(RANGE_NOW)
 
 
 def command_deg(name, fin=0):
@@ -188,10 +210,12 @@ def command_deg(name, fin=0):
 
 
 def emit(path):
+    assert RANGE_DEG == RANGE_NOW, "the firmware table is the current scale"
     L = ["/* GENERATED by Tools/bench/servo_id/profiles.py --emit. Do not edit: change profiles.py and run it again.",
-         " * BENCH-02 servo identification profiles (bench.h). */",
+         f" * BENCH-02 servo identification profiles (bench.h), in ticks at {SPAN_TICKS} ticks per {RANGE_DEG} deg. */",
          '#include "bench.h"', "", "#if CFG_BENCH_PROFILE", "",
          f'_Static_assert((BENCH_PRE_FRAMES == {PRE}u) && (BENCH_POST_FRAMES == {POST}u) && (BENCH_LED_HALF == {LED_HALF}u), "regenerate: profiles.py timing");',
+         f'_Static_assert((((SERVO_MAX_US - SERVO_MIN_US) * PWM_TICKS_PER_US) == {SPAN_TICKS}u) && (((int32_t)SERVO_RANGE_DEG) == {RANGE_DEG}), "the profiles are in ticks at {SPAN_TICKS} per {RANGE_DEG} deg: regenerate (profiles.py --emit)");',
          f'_Static_assert((BENCH_DITHER_TICKS == {DITHER_TICKS}) && (BENCH_DITHER_HALF == {DITHER_HALF}u) && (BENCH_TICKS_MAX == {TICKS_MAX}), "regenerate: profiles.py constants");',
          "", "/* Quarter sine, 32767 x sin(pi/2 x k/256). */", "const int16_t k_bench_sin_q[257] = {"]
     for i in range(0, 257, 12):
@@ -227,6 +251,9 @@ def emit(path):
 
 
 if __name__ == "__main__":
+    if "--range" in sys.argv:                       # list another scale's set, e.g. --range 135
+        use_range(int(sys.argv[sys.argv.index("--range") + 1]))
+    print(f"servo scale {RANGE_DEG} deg over {SPAN_TICKS} ticks: {RANGES[RANGE_DEG]}")
     if "--emit" in sys.argv:
         out = os.path.normpath(os.path.join(HERE, "..", "..", "..", "Core", "hyades", "svc", "bench_profiles.c"))
         emit(out)
