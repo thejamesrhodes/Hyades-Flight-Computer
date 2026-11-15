@@ -6,6 +6,14 @@
 **Decisions it supports:** ADR-004.
 **Figures:** `Images/adr004/`.
 
+> **15 Nov 2026 (SYSID-01 rev 2):** the flight law is now law 2, the observer (ESO), and flight 1 carries a roll test. Results for the flight-1 build:
+> - build tolerance: **600 / 600** (`runs/G1_fl1_final`);
+> - wide tolerance: 96.7 %;
+> - slow servo: 100 %;
+> - hard-over: 48.3 %.
+>
+> SYSID-01 §9 has these and the paired no-test runs. The tables below are for law 1.
+
 ## 1. What is simulated
 
 ### 1.1 The flight code

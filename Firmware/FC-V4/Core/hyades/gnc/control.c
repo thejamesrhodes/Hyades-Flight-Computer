@@ -67,7 +67,7 @@ static float clampf(float x, float lim)
 void Ctrl_Init(Controller *c)
 {
     c->mode = CTRL_MODE_OFF;
-    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f; c->trim_T = 0.0f; c->p_ref = 0.0f; c->u_exc = 0.0f; c->eso_init = false;
+    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f; c->trim_T = 0.0f; c->p_ref = 0.0f; c->u_exc = 0.0f; c->eso_init = false; c->eso_enable = false; c->eso_k = 0u;
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; c->omega_prev[i]=0.0f; }
     for (int i=0;i<4;i++) { c->delta_f[i]=0.0f; c->fin_last[i]=0.0f; }
     for (int i=0;i<3;i++) { c->bq_wdot[i].z1=0.0f; c->bq_wdot[i].z2=0.0f; }
@@ -116,21 +116,36 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
 #endif
     const float d_damp = Kp * (c->p_ref - p);           /* p_e = ref - p */
 #if CTRL_ROLL_LAW == 2
-    if (trim_on) {
+    /* SYSID-01 observer law: delta = (c/q)(p_ref - p) - f_hat / (beta q). Runs only while the
+     * flight code enables it (BOOST/COAST with q_hat valid and >= CTRL_ESO_Q_ON): on the pad or
+     * on a bench the canards produce no torque, and an observer would then integrate its own
+     * command. Entry starts from the current trim (bumpless); exit hands the cancellation back
+     * to the trim integrator, bounded by its clamp. */
+    if (trim_on && c->eso_enable) {
         const float b0 = CTRL_ESO_BETA * q_e;            /* rad/s^2 per rad at the canard */
-        if (!c->eso_init) { c->eso_z1 = p; c->eso_z2 = 0.0f; c->eso_ua = 0.0f; for (int i = 0; i < 8; i++) { c->eso_u[i] = 0.0f; } c->eso_init = true; }
+        if (!c->eso_init) {
+            const float u0 = clampf(d_damp + c->trim, CTRL_ROLL_TRAVEL_RAD);
+            c->eso_z1 = p; c->eso_z2 = -b0 * c->trim; c->eso_ua = u0;
+            for (uint32_t i = 0u; i < 8u; i++) { c->eso_u[i] = u0; }
+            c->eso_init = true;
+        }
         /* modelled canard: the command CTRL_ESO_DN + 1 frames back through a first-order lag (the servo) */
         const float ud = c->eso_u[(c->eso_k + 8u - (uint32_t)CTRL_ESO_DN) & 7u];
         c->eso_ua += (dt / (CTRL_ESO_TA + dt)) * (ud - c->eso_ua);
         const float e = p - c->eso_z1, l1 = 2.0f * CTRL_ESO_WO, l2 = CTRL_ESO_WO * CTRL_ESO_WO;
         c->eso_z1 += dt * (c->eso_z2 + (b0 * c->eso_ua) + (l1 * e));
         c->eso_z2 += dt * (l2 * e);
-        float u = d_damp - (c->eso_z2 / b0);
-        u = clampf(u, CTRL_ROLL_TRAVEL_RAD);
-        c->trim = u - d_damp;                             /* for the log: the disturbance cancellation */
-        c->eso_k++; c->eso_u[c->eso_k & 7u] = u;          /* what the canard was told this frame */
+        const float u = clampf(d_damp - (c->eso_z2 / b0), CTRL_ROLL_TRAVEL_RAD);
+        c->trim = u - d_damp;                             /* logged: the disturbance cancellation */
+        const float out = clampf(u + c->u_exc, CTRL_ROLL_TRAVEL_RAD);
+        c->eso_k++; c->eso_u[c->eso_k & 7u] = out;        /* the observer knows the excitation: not cancelled */
         c->dither = 0.0f;
-        return clampf(u + c->u_exc, CTRL_ROLL_TRAVEL_RAD);
+        return out;
+    }
+    if (c->eso_init) {                                   /* hand back to the trim integrator */
+        c->trim = clampf(c->trim, CTRL_TRIM_CLAMP);
+        c->trim_T = c->trim * q_e;
+        c->eso_init = false;
     }
 #endif
     if (trim_on) {

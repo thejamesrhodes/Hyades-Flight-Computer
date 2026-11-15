@@ -89,7 +89,7 @@ def build(variant):
     exe = os.path.join(HERE, f"sitl_{tag}")
     core = os.path.join(HERE, "..", "..", "Core")
     src = ["sitl.c"] + [os.path.join(core, "hyades", p) for p in
-           ("mission/flight.c", "mission/phase.c", "mission/fdir.c", "mission/detect.c",
+           ("mission/flight.c", "mission/rolltest.c", "mission/phase.c", "mission/fdir.c", "mission/detect.c",
             "gnc/control.c", "gnc/alloc.c", "gnc/iekf.c", "gnc/nav.c")]
     inc = [f"-I{os.path.join(core, 'hyades', s)}" for s in ("math", "gnc", "mission", "svc")] + [f"-I{os.path.join(core, 'Inc')}"]
     subprocess.run(["gcc", "-std=c11", "-O2", "-D_DEFAULT_SOURCE", *variant.split(), *inc, "-o", exe, *src, "-lm"],

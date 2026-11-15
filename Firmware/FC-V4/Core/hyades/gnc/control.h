@@ -72,6 +72,7 @@ typedef struct {
     float u_exc;              /* additive roll excitation, rad at the canard (system ID; 0 normally) */
     float eso_z1, eso_z2, eso_ua; /* law 2: rate estimate, disturbance accel, modelled canard */
     float eso_u[8]; uint32_t eso_k; bool eso_init;
+    bool  eso_enable;         /* law 2: set each frame by the flight code (BOOST/COAST, q valid, q >= CTRL_ESO_Q_ON) */
 
     /* outer-loop integral on the Lie algebra (anti-windup: norm-clamped) */
     float e_I[3];

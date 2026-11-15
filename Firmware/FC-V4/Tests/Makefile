@@ -12,7 +12,7 @@ CFLAGS  := -std=c11 -O2 -g -Wall -Wextra -Werror -Wundef -Wshadow \
            -Iunity -I$(CORE)/math -I$(CORE)/gnc -I$(CORE)/mission -I$(CORE)/svc -I../Core/Inc
 OUT     := ../build-host
 
-TESTS := test_crc test_nmea test_logrec test_phase test_fdir test_control test_iekf test_nav test_detect test_logq test_flight test_dither test_alloc test_fincal test_align test_bench
+TESTS := test_crc test_nmea test_logrec test_phase test_fdir test_control test_iekf test_nav test_detect test_logq test_flight test_dither test_alloc test_fincal test_align test_bench test_rolltest
 
 SRC_test_crc     := $(CORE)/svc/crc.c
 SRC_test_nmea    := $(CORE)/svc/nmea.c
@@ -34,7 +34,8 @@ SRC_test_iekf    := $(CORE)/gnc/iekf.c
 SRC_test_nav     := $(CORE)/gnc/nav.c
 SRC_test_detect  := $(CORE)/mission/detect.c $(CORE)/mission/phase.c
 SRC_test_logq    := $(CORE)/svc/logq.c
-SRC_test_flight  := $(CORE)/mission/flight.c $(CORE)/mission/phase.c $(CORE)/mission/fdir.c $(CORE)/mission/detect.c $(CORE)/gnc/control.c $(CORE)/gnc/alloc.c $(CORE)/gnc/iekf.c $(CORE)/gnc/nav.c
+SRC_test_flight  := $(CORE)/mission/flight.c $(CORE)/mission/rolltest.c $(CORE)/mission/phase.c $(CORE)/mission/fdir.c $(CORE)/mission/detect.c $(CORE)/gnc/control.c $(CORE)/gnc/alloc.c $(CORE)/gnc/iekf.c $(CORE)/gnc/nav.c
+SRC_test_rolltest := $(CORE)/mission/rolltest.c
 
 all: $(addprefix $(OUT)/,$(TESTS))
 	@fail=0; for t in $(TESTS); do $(OUT)/$$t || fail=1; done; exit $$fail

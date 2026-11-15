@@ -29,9 +29,10 @@
 #include "alloc.h"
 #include "nav.h"
 #include "detect.h"
+#include "rolltest.h"
 
 /* Event codes (also the EVENT log record code). */
-typedef enum { EV_BOOT = 1, EV_PHASE, EV_TRIP, EV_CLEAR, EV_MODE, EV_LOG, EV_CORRUPT, EV_MAINT, EV_CAL } EventCode;
+typedef enum { EV_BOOT = 1, EV_PHASE, EV_TRIP, EV_CLEAR, EV_MODE, EV_LOG, EV_CORRUPT, EV_MAINT, EV_CAL, EV_ROLLTEST } EventCode;
 
 typedef void (*FlightEventFn)(void *ctx, EventCode code, uint32_t arg, const char *text);
 
@@ -65,6 +66,7 @@ typedef struct {
     Alloc      alloc;          /* control allocation (ALLOC-01)               */
     Nav        nav;
     Detect     det;
+    RollTest   rt;             /* in-flight roll test (SYSID-01), CFG_ROLL_TEST */
     float      fin[4];         /* normalised fin commands APPLIED [-1, 1]      */
     float      fin_cmd[4];     /* law output, before allocation               */
     bool       shadow;         /* CFG_CTRL_SHADOW: law runs, canards held at 0 */

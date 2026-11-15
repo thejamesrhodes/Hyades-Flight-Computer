@@ -47,6 +47,7 @@
 #define LOGF_GPS_FIX     (1u << 4)
 #define LOGF_SHADOW      (1u << 5)   /* fin[] is the law output, canards held */
 #define LOGF_PRETRIG     (1u << 6)   /* recorded in the READY pre-trigger ring */
+#define LOGF_ROLLTEST    (1u << 7)   /* in-flight roll test active (SYSID-01): p_ref / u_exc non-zero */
 
 typedef struct {
     uint32_t t_us;

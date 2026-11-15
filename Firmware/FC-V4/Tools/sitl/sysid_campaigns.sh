@@ -29,7 +29,7 @@ python3 mc.py $B "--variant=$L2 -DCTRL_ESO_WO=20.0f -DCTRL_ESO_DN=3 -DCTRL_ESO_T
 # 3. test manoeuvres (sections 5-6): man.py builds nothing; make the two simulators first
 make && cp sitl sitl_law1
 cc -std=c11 -O2 -D_DEFAULT_SOURCE -DCTRL_ROLL_LAW=2 -I../../Core/hyades/math -I../../Core/hyades/gnc -I../../Core/hyades/mission \
-   -I../../Core/hyades/svc -I../../Core/Inc -o sitl_law2 sitl.c ../../Core/hyades/mission/flight.c ../../Core/hyades/mission/phase.c \
+   -I../../Core/hyades/svc -I../../Core/Inc -o sitl_law2 sitl.c ../../Core/hyades/mission/flight.c ../../Core/hyades/mission/rolltest.c ../../Core/hyades/mission/phase.c \
    ../../Core/hyades/mission/fdir.c ../../Core/hyades/mission/detect.c ../../Core/hyades/gnc/control.c ../../Core/hyades/gnc/alloc.c \
    ../../Core/hyades/gnc/iekf.c ../../Core/hyades/gnc/nav.c -lm
 python3 man.py --exe ./sitl_law1 --kind 0 --n 20 --out runs/K0_none

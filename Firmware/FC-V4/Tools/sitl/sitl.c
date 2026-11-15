@@ -796,6 +796,7 @@ int main(int argc, char **argv)
 
     /* metrics */
     double p_max_boost = 0, p_max_coast = 0, p2_coast = 0, n_coast = 0, aoa_max = 0, wlat_max = 0, q_max = 0;
+    double rt_quiet_t = 0, p_max_rt = 0, rt_t0 = -1, rt_t1 = -1, rt_q_end = 0;   /* roll test (CFG_ROLL_TEST) */
     double defl_max = 0, sat_n = 0, act_n = 0, qhat_e2 = 0, qhat_emax = 0, n_q = 0, pcan_max = 0, ratio_max = 0;
     double nlat_max = 0, qalpha_max = 0, t_ready = -1, p_apo = 0, h_err_apo = 0, trim_last = 0, wl_coast_max = 0;
     double p_coast_end = 0, mach_max = 0, body_ratio_max = 0;
@@ -909,7 +910,14 @@ int main(int argc, char **argv)
                 if (!P.on_rail) {
                     if (thrust() > 0) { if (pz > p_max_boost) { p_max_boost = pz; } p2_boost += pz * pz; n_boost++; }
                     else if (P.v.z > 0) {
-                        if (pz > p_max_coast) { p_max_coast = pz; } p2_coast += pz * pz; n_coast++; wl2_coast += wl * wl;
+                        /* R5b (coast RMS) excludes the roll test and the second after it: the rate is commanded there */
+                        if (RollTest_Active(&F.rt) || (F.rt.st == RT_DONE) || (F.rt.st == RT_ABORTED)) {
+                            if (RollTest_Active(&F.rt)) { rt_quiet_t = P.t + 1.0; if (pz > p_max_rt) { p_max_rt = pz; } if (rt_t0 < 0) { rt_t0 = tt; } }
+                            else if (rt_t1 < 0) { rt_t1 = tt; rt_q_end = F.nav.qbar; }
+                        }
+                        if (pz > p_max_coast) { p_max_coast = pz; }
+                        if (P.t >= rt_quiet_t) { p2_coast += pz * pz; n_coast++; }
+                        wl2_coast += wl * wl;
                         if (wl > wl_coast_max) { wl_coast_max = wl; } p_coast_end = P.w.z * R2D;
                     }
                     if ((P.v.z > 0) && (P.qbar > 500.0) && (P.alpha * R2D > aoa_max)) { aoa_max = P.alpha * R2D; }
@@ -967,13 +975,14 @@ int main(int argc, char **argv)
     const double tl_true = 0.0;
     printf("t_ground=%.2f seed=%llu motor=%s apogee=%.1f t_apogee=%.2f q_max=%.0f mach_max=%.3f "
            "det_liftoff=%.3f det_burnout=%.3f t_burnout=%.3f det_apogee=%.3f det_landed=%.2f t_rest=%.2f "
-           "ok_seq=%d phase_bad=%d p_max_boost=%.1f p_max_coast=%.1f p_rms_coast=%.1f p_coast_end=%.1f p_apogee=%.1f "
+           "rt_state=%d rt_why=%d rt_q=%.0f rt_p_max=%.1f rt_end=%d rt_t0=%.2f rt_t1=%.2f rt_q_end=%.0f ok_seq=%d phase_bad=%d p_max_boost=%.1f p_max_coast=%.1f p_rms_coast=%.1f p_coast_end=%.1f p_apogee=%.1f "
            "wlat_max=%.1f wlat_coast_max=%.1f aoa_max=%.2f qalpha_max=%.0f nlat_max=%.2f defl_max=%.2f sat_frac=%.4f "
            "qhat_rms=%.2f qhat_max=%.2f h_err_apo=%.2f pcan_max=%.0f can_pitch_ratio=%.2f impact_g=%.1f trim=%.4f "
            "reached_ready=%d final_phase=%u body_pitch_ratio=%.2f p_rms_boost=%.2f wl_rms_coast=%.2f pyd_rms=%.4f sv_act=%.3f ",
            (P.t_ground > 0) ? P.t_ground - P.t_ign : -1, (unsigned long long)C.seed, C.motor, P.apogee, P.t_apogee, q_max, mach_max,
            ev_seen[3] ? ev_t[3] - tl_true : -1, ev_seen[4] ? ev_t[4] : -1, MO.tb,
            ev_seen[5] ? ev_t[5] : -1, ev_seen[6] ? ev_t[6] : -1, (P.t_rest > 0) ? P.t_rest - P.t_ign : -1,
+           (int)F.rt.st, (int)F.rt.why, (double)F.rt.q_start, p_max_rt, (int)F.rt.st_end, rt_t0, rt_t1, rt_q_end,
            ev_seen[3] && ev_seen[4] && ev_seen[5] && ev_seen[6] && !ev_seen[7] && !ev_seen[8], phase_bad,
            p_max_boost, p_max_coast, (n_coast > 0) ? sqrt(p2_coast / n_coast) : 0, p_coast_end, p_apo,
            wlat_max, wl_coast_max, aoa_max, qalpha_max, nlat_max, defl_max, (act_n > 0) ? sat_n / act_n : 0,

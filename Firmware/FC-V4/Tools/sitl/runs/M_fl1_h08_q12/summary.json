@@ -1,0 +1,120 @@
+{
+ "args": {
+  "exe": "/home/claude/fc116/Tools/sitl/sitl_c246ffbf",
+  "kind": 0,
+  "amp": 114.6,
+  "T": 0.8,
+  "ua": 2.0,
+  "dt": 0.1,
+  "t0": 0.25,
+  "gap": 0.2,
+  "n": 20,
+  "out": "runs/M_fl1_h08_q12",
+  "keep": 0
+ },
+ "n": 120,
+ "p_max_p95": 136.01,
+ "p_max_max": 139.3,
+ "body_ratio_max": 0.3,
+ "can_ratio_max": 0.38,
+ "p_rms_coast_p95": 10.305,
+ "t90": [
+  0.194,
+  0.367,
+  0.738
+ ],
+ "ovs": [
+  -0.124,
+  -0.005,
+  0.151
+ ],
+ "err_hold": [
+  -0.07,
+  0.039,
+  0.182
+ ],
+ "p_after_1s": [
+  0.188,
+  3.06,
+  10.092
+ ],
+ "p_rms_after": [
+  13.665,
+  16.763,
+  20.658
+ ],
+ "q_start": [
+  3501.4,
+  4995.0,
+  7703.8
+ ],
+ "q_end": [
+  1251.8,
+  1760.0,
+  2776.8
+ ],
+ "defl_max_man": [
+  0.843,
+  1.446,
+  2.688
+ ],
+ "pcan_max_man": [
+  70.46,
+  92.2,
+  275.26
+ ],
+ "t_man": [
+  2.275,
+  2.495,
+  2.495
+ ],
+ "log_beta_ratio_p5_50_95": [
+  0.469,
+  0.733,
+  0.966
+ ],
+ "log_beta_err_rms": 0.325,
+ "log_beta_se_rel_med": 0.026,
+ "fine_beta_ratio_p5_50_95": [
+  0.524,
+  0.762,
+  1.003
+ ],
+ "fine_beta_err_rms": 0.281,
+ "fine_beta_se_rel_med": 0.023,
+ "fine_can_beta_ratio_p5_50_95": [
+  0.546,
+  0.892,
+  1.046
+ ],
+ "fine_can_beta_err_rms": 0.221,
+ "fine_can_beta_se_rel_med": 0.019,
+ "video_slip_beta_ratio_p5_50_95": [
+  0.476,
+  0.738,
+  0.96
+ ],
+ "video_slip_beta_err_rms": 0.318,
+ "video_slip_beta_se_rel_med": 0.026,
+ "video_raw_beta_ratio_p5_50_95": [
+  0.265,
+  0.576,
+  0.835
+ ],
+ "video_raw_beta_err_rms": 0.471,
+ "video_raw_beta_se_rel_med": 0.039,
+ "video_beta_ratio_p5_50_95": [
+  0.543,
+  0.771,
+  1.012
+ ],
+ "video_beta_err_rms": 0.29,
+ "video_beta_se_rel_med": 0.026,
+ "video_fine_beta_ratio_p5_50_95": [
+  0.576,
+  0.789,
+  1.0
+ ],
+ "video_fine_beta_err_rms": 0.623,
+ "video_fine_beta_se_rel_med": 0.022
+}

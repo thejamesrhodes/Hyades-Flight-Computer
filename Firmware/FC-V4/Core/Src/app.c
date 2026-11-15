@@ -426,6 +426,9 @@ static void task_log(void)
         s.flags = (uint8_t)((A.imu.ok ? (LOGF_GYRO_OK | LOGF_ACCEL_OK) : 0u)
                 | (A.F.acc_applied ? LOGF_ACC_APPLIED : 0u) | (A.overran ? LOGF_OVERRUN : 0u)
                 | (A.F.shadow ? LOGF_SHADOW : 0u) | ((A.logm == LOGM_ARMED) ? LOGF_PRETRIG : 0u)
+#if CFG_ROLL_TEST
+                | (RollTest_Active(&A.F.rt) ? LOGF_ROLLTEST : 0u)
+#endif
 #if CFG_ENABLE_GPS
                 | (GPS_HasFix(GPS_TIMEOUT_MS) ? LOGF_GPS_FIX : 0u)
 #endif

@@ -101,6 +101,22 @@ static void test_phase_sequence_nominal(void)
     TEST_ASSERT_EQUAL(PH_DESCENT, seq[5]);
 }
 
+/* SYSID-01: the roll test is initialised by Flight_Init, runs once in COAST and is
+ * finished (done, skipped or abandoned) with zero outputs by DESCENT */
+static void test_roll_test_runs_once_in_coast(void)
+{
+    boot_to_ready();
+    TEST_ASSERT_TRUE(F.rt.nu > 0u);
+    TEST_ASSERT_EQUAL_INT(RT_IDLE, F.rt.st);
+    fly_to_descent();
+#if CFG_ROLL_TEST
+    TEST_ASSERT_TRUE((F.rt.st == RT_DONE) || (F.rt.st == RT_SKIPPED) || (F.rt.st == RT_ABORTED));
+#endif
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, F.ctrl.p_ref);
+    TEST_ASSERT_EQUAL_FLOAT(0.0f, F.ctrl.u_exc);
+    TEST_ASSERT_FALSE(F.ctrl.eso_enable);                 /* the observer is off outside BOOST/COAST */
+}
+
 static void test_no_false_landing_under_canopy(void)
 {
     boot_to_ready(); fly_to_descent();
@@ -220,5 +236,6 @@ int main(void)
     RUN_TEST(test_corrupt_word_in_cato_stays_cato_then_lands);
     RUN_TEST(test_liftoff_from_settling_is_sequenced);
     RUN_TEST(test_align_holds_and_liftoff_sequenced);
+    RUN_TEST(test_roll_test_runs_once_in_coast);
     return UNITY_END();
 }

@@ -28,12 +28,27 @@ def act_model(cmd, n_delay=1, ta=0.012, dt=0.01):
     return y
 
 
-def identify(c, q_cmd, slip=None):
+def act_from_video(cmd, tv, dl_v, t):
+    """Fit the servo map to the video canard angle (gain, offset, dead time, lag) and return the fitted,
+    noise-free canard at the log rate. Regressing on the raw video angle instead biases beta low
+    (errors in variables: 0.2 deg of frame noise against a 0.3-1 deg excitation)."""
+    best = None
+    for n in range(0, 5):
+        for ta in (0.005, 0.010, 0.015, 0.020, 0.030, 0.040):
+            pr = act_model(cmd, n, ta); x = np.interp(tv, t, pr)
+            A = np.column_stack([x, np.ones_like(x)]); th, *_ = np.linalg.lstsq(A, dl_v, rcond=None)
+            r = float(np.sum((dl_v - A @ th) ** 2))
+            if best is None or r < best[0]:
+                best = (r, th[0] * pr + th[1], th[0], n, ta)
+    return best[1], best[2], best[3], best[4]
+
+
+def identify(c, q_cmd, slip=None, act=True):
     """c: 100 Hz coast rows. Returns beta-hat (1/(Pa s^2)), friction term (rad/s^2), residual sd."""
     p = np.radians(c.gyro_p_q.values)
     pd_ = savgol_filter(p, 9, 2, deriv=1, delta=0.01)
     ps = savgol_filter(p, 9, 2)
-    d = np.radians(act_model(q_cmd))
+    d = np.radians(act_model(q_cmd) if act else q_cmd)          # video: the canard itself, no servo model
     qh = c.qbar_est.values; V = np.maximum(c.vz_est.values, 5.0)
     sl = ps if slip is None else savgol_filter(slip, 9, 2)
     X = np.column_stack([qh * d, qh * ps / V, np.tanh(sl / 0.5), qh, np.ones_like(qh)])
@@ -96,8 +111,23 @@ def one(job):
     lg["gyro_p_q"] = np.round(lg.gyro_p_dps * 10) / 10
     cmd = lg.roll_cmd.values * 30.0
     slip = np.radians(lg.gyro_p_q.values - np.round(lg.pcan_dps.values))     # with a can-spin sensor, 1 dps
-    for tag, q, sv in (("log", np.round(cmd * 127 / 30) * 30 / 127, None), ("fine", cmd, None), ("fine_can", cmd, slip)):
-        idn = identify(lg, q, sv)
+    # onboard video (offline): fin-can roll relative to the body and one canard's angle, 60 fps,
+    # 1 deg and 0.2 deg rms noise per frame, synchronised to the log (SYSID-01 section 9)
+    rng = np.random.default_rng(int(seed) % 2**32)
+    tv = np.arange(lg.t.values[0], lg.t.values[-1], 1 / 60.0)
+    rel = np.cumsum(np.radians(lg.p_dps.values - lg.pcan_dps.values)) * 0.01          # body-can angle, rad
+    rel_v = np.interp(tv, lg.t.values, rel) + np.radians(1.0) * rng.standard_normal(len(tv))
+    slip_v = np.interp(lg.t.values, tv, np.gradient(savgol_filter(rel_v, 7, 2), 1 / 60.0))
+    dl_true = lg[["delta0", "delta1", "delta2", "delta3"]].mean(axis=1).values
+    sync = 0.008 * rng.standard_normal()                     # video-to-log sync by the horizon, about +/-1 frame
+    dl_f = np.interp(tv + sync, lg.t.values, dl_true) + 0.2 * rng.standard_normal(len(tv))   # video frames
+    dl_raw = np.interp(lg.t.values, tv, dl_f)
+    cmd_q = np.round(cmd * 127 / 30) * 30 / 127
+    dl_fit, out["video_act_gain"], out["video_act_n"], out["video_act_ta"] = act_from_video(cmd_q, tv, dl_f, lg.t.values)
+    dl_fit_f = act_from_video(cmd, tv, dl_f, lg.t.values)[0]                # with the command logged finely (S14)
+    for tag, q, sv, act in (("log", cmd_q, None, True), ("fine", cmd, None, True), ("fine_can", cmd, slip, True),
+                            ("video_slip", cmd_q, slip_v, True), ("video_raw", dl_raw, slip_v, False), ("video", dl_fit, slip_v, False), ("video_fine", dl_fit_f, slip_v, False)):
+        idn = identify(lg, q, sv, act)
         out.update({f"{tag}_{k}": v for k, v in idn.items()})
         out[f"{tag}_ratio"] = idn["beta"] / out["beta_true"]
     return out
@@ -127,7 +157,7 @@ def main():
     for c in ("t90", "ovs", "err_hold", "p_after_1s", "p_rms_after", "q_start", "q_end", "defl_max_man", "pcan_max_man", "t_man"):
         if c in df:
             s[c] = [round(float(np.nanpercentile(df[c], x)), 3) for x in (5, 50, 95)]
-    for tag in ("log", "fine", "fine_can"):
+    for tag in ("log", "fine", "fine_can", "video_slip", "video_raw", "video", "video_fine"):
         r = df[f"{tag}_ratio"]
         s[f"{tag}_beta_ratio_p5_50_95"] = [round(float(np.nanpercentile(r, x)), 3) for x in (5, 50, 95)]
         s[f"{tag}_beta_err_rms"] = round(float(np.sqrt(np.nanmean((r - 1) ** 2))), 3)

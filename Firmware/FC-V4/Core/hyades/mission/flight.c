@@ -49,6 +49,7 @@ void Flight_Init(Flight *f, const NavCfg *nav, const DetectCfg *det, uint32_t re
                  uint32_t bridge_n, bool bench_ready, FlightEventFn ev, void *ev_ctx)
 {
     memset(f, 0, sizeof *f);
+    RollTest_Init(&f->rt, (float)FRAME_HZ);
     Phase_Init(&f->ph);
     Fdir_Init(&f->fdir);
     Ctrl_Init(&f->ctrl);
@@ -209,6 +210,29 @@ void Flight_Step(Flight *f, const FlightIn *in, float dt)
     estimate(f, in, dt);
     monitor_and_arbitrate(f, in, dt);
     Ctrl_SetQbar(&f->ctrl, f->nav.qbar, Nav_QValid(&f->nav) && (f->ctrl.mode == CTRL_MODE_FULL));
+    {
+        const Phase ph = Flight_Phase(f);
+#if CTRL_ROLL_LAW == 2
+        /* the observer only where the canards make torque (control.c) */
+        f->ctrl.eso_enable = ((ph == PH_BOOST) || (ph == PH_COAST)) && Nav_QValid(&f->nav) && (f->nav.qbar >= CTRL_ESO_Q_ON);
+#endif
+#if CFG_ROLL_TEST
+        const bool ok = (f->ctrl.mode == CTRL_MODE_FULL) && (Fdir_Worst(&f->fdir, Phase_InFlight(ph)) == SEV_INFO);
+        const RtEvent ev = RollTest_Step(&f->rt, ph, ok, Nav_QValid(&f->nav), f->nav.qbar, f->iekf.omega[2]);
+        f->ctrl.p_ref = f->rt.p_ref;
+        f->ctrl.u_exc = f->rt.u_exc;
+        if (ev != RT_EV_NONE) {
+            /* fits the 26-char log text: "rt abort phase dbl 65535" */
+            static const char *const k_ev[] = { "", "start", "done", "skip", "abort" };
+            static const char *const k_st[] = { "-", "wait", "exc", "gap", "dbl", "-", "-", "-" };
+            char t[26];
+            (void)snprintf(t, sizeof t, "rt %s %s %s %lu", k_ev[ev], RollTest_Why(f->rt.why),
+                           k_st[(uint32_t)f->rt.st_end & 7u], (unsigned long)lroundf(f->rt.q_start));
+            const uint32_t q2 = (uint32_t)fminf(fmaxf(f->rt.q_start * 0.5f, 0.0f), 65535.0f);
+            emit(f, EV_ROLLTEST, (uint32_t)ev | ((uint32_t)f->rt.why << 8) | ((uint32_t)f->rt.st_end << 12) | (q2 << 16), t);
+        }
+#endif
+    }
     Ctrl_Update(&f->ctrl, f->iekf.q, f->iekf.omega, f->gyro_rad, dt, f->fin_cmd);
     float fin_alloc[4];
     Alloc_Apply(&f->alloc, f->fin_cmd, f->ctrl.mode != CTRL_MODE_OFF, fin_alloc);

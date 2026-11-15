@@ -177,22 +177,28 @@
  * HITL showed limit-cycles (G is really k_b*q: 270-5500 rad/s^2 per unit fin
  * over the envelope against the fixed 160). */
 #ifndef CTRL_ROLL_LAW
-#define CTRL_ROLL_LAW          1
+#define CTRL_ROLL_LAW          2        /* 2 = law 1 plus the disturbance observer (SYSID-01, 15 Nov) */
 #endif
-/* Law 2 (SYSID-01 study, not flown): q-scheduled extended state observer (ADRC). Plant pdot = beta q delta + f,
- * f the lumped disturbance (bearing friction from the fin can, cant, Cl0, damping); beta is the one model
- * number (S d Cl_delta / Ixx, nominal), the assumption c already makes. delta = (c/q)(p_ref - p) - f_hat/(beta q). */
+/* Law 2: q-scheduled extended state observer (ADRC). Plant pdot = beta q delta + f, f the lumped
+ * disturbance (bearing friction from the fin can, cant, Cl0, damping); beta is the one model
+ * number (S d Cl_delta / Ixx), the assumption c already makes. delta = (c/q)(p_ref - p) - f_hat/(beta q).
+ * SITL (SYSID-01 section 4): coast roll RMS p95 19 -> 6 dps; unstable if the true beta exceeds about
+ * 3 x CTRL_ESO_BETA, or the servo is much slower than the observer's model, hence the margins below. */
 #ifndef CTRL_ESO_BETA
-#define CTRL_ESO_BETA          0.559f   /* 1/(Pa s^2): 3.02e-3 x 0.062 x 0.657 / 2.2e-4 */
+#define CTRL_ESO_BETA          0.727f   /* 1/(Pa s^2): 1.3 x nominal 3.02e-3 x 0.062 x 0.657 / 2.2e-4 */
 #endif
 #ifndef CTRL_ESO_WO
-#define CTRL_ESO_WO            30.0f    /* rad/s observer bandwidth */
+#define CTRL_ESO_WO            20.0f    /* rad/s observer bandwidth */
 #endif
 #ifndef CTRL_ESO_DN
-#define CTRL_ESO_DN            2        /* observer input = the command DN+1 frames back (15 ms at DN 2) */
+#define CTRL_ESO_DN            3        /* observer input = the command DN+1 frames back (20 ms):
+                                         * slower than the BENCH-02 servo on purpose */
 #endif
 #ifndef CTRL_ESO_TA
-#define CTRL_ESO_TA            0.012f   /* s, first-order servo lag in the observer's input model */
+#define CTRL_ESO_TA            0.020f   /* s, first-order servo lag in the observer's input model */
+#endif
+#ifndef CTRL_ESO_Q_ON
+#define CTRL_ESO_Q_ON          1000.0f  /* Pa: below this (or q invalid, or outside BOOST/COAST) law 1 runs */
 #endif
 #ifndef CTRL_ROLL_C   /* SITL sweeps override with -D */
 #define CTRL_ROLL_C            15.0f    /* Pa s, Kp = c/q. ADR-004 §3 / MC-01: forward-
@@ -210,6 +216,47 @@
 #endif
 #define CTRL_ROLL_Q_FALLBACK   40000.0f /* Pa: q_hat invalid -> lowest gain       */
 #define CTRL_ROLL_TRAVEL_RAD   0.2094f  /* P.Servo.Travel, +/-12 deg at the canard */
+/* In-flight roll test (SYSID-01 section 6), once, in COAST, flight 1 onwards. After COAST entry
+ * + RT_T0_S, if q_hat >= RT_Q_START_PA and no fault: a 3-2-1-1 added at the canard (unit RT_UNIT_S,
+ * amplitude RT_UA_DEG x RT_Q_REF_PA / q_hat latched at the start, at most RT_UA_MAX_DEG), RT_GAP_S,
+ * then a roll-rate doublet +/-RT_RATE_DPS for RT_HOLD_S each. Abandoned at once, back to the zero-rate
+ * law, if q_hat < RT_Q_ABORT_PA, |p| > RT_P_ABORT_DPS, a fault, or a mode or phase change. */
+#ifndef CFG_ROLL_TEST
+#define CFG_ROLL_TEST          1
+#endif
+#ifndef RT_T0_S
+#define RT_T0_S                0.15f
+#endif
+#ifndef RT_Q_START_PA
+#define RT_Q_START_PA          3000.0f
+#endif
+#ifndef RT_Q_ABORT_PA
+#define RT_Q_ABORT_PA          1200.0f  /* above CTRL_ESO_Q_ON, so the observer stays on */
+#endif
+#ifndef RT_P_ABORT_DPS
+#define RT_P_ABORT_DPS         200.0f
+#endif
+#ifndef RT_Q_REF_PA
+#define RT_Q_REF_PA            3000.0f
+#endif
+#ifndef RT_UA_DEG
+#define RT_UA_DEG              0.5f
+#endif
+#ifndef RT_UA_MAX_DEG
+#define RT_UA_MAX_DEG          1.5f
+#endif
+#ifndef RT_UNIT_S
+#define RT_UNIT_S              0.1f
+#endif
+#ifndef RT_GAP_S
+#define RT_GAP_S               0.2f
+#endif
+#ifndef RT_RATE_DPS
+#define RT_RATE_DPS            114.6f   /* 2 rad/s */
+#endif
+#ifndef RT_HOLD_S
+#define RT_HOLD_S              0.6f     /* 2.1 s in all; completes on 585 / 600 SITL flights (SYSID-01 section 9) */
+#endif
 #ifndef CTRL_TRIM_KI   /* SITL sweeps override with -D */
 #define CTRL_TRIM_KI           0.0234f  /* P.Trim.Ki                              */
 #endif
