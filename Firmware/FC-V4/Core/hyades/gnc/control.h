@@ -68,6 +68,10 @@ typedef struct {
     float trim_T;             /* CTRL_TRIM_QSCHED 1: trim state as q*delta (Pa rad) */
     uint32_t dither_k;        /* roll-law calls since actuation began (dither phase) */
     float dither;             /* dither added this frame, rad at the canard   */
+    float p_ref;              /* roll-rate reference, rad/s (0: zero-rate law; test manoeuvres) */
+    float u_exc;              /* additive roll excitation, rad at the canard (system ID; 0 normally) */
+    float eso_z1, eso_z2, eso_ua; /* law 2: rate estimate, disturbance accel, modelled canard */
+    float eso_u[8]; uint32_t eso_k; bool eso_init;
 
     /* outer-loop integral on the Lie algebra (anti-windup: norm-clamped) */
     float e_I[3];

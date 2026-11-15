@@ -100,6 +100,11 @@ typedef struct {
     int    shadow; int fin_deg;
     /* worst-case manoeuvre study: canards forced to a fixed pitch deflection */
     double force_deg, force_t; int force_mode;
+    /* in-flight test manoeuvre (closed loop), timed from COAST entry (detected burnout):
+     * man_kind 1 rate step +A for T; 2 rate doublet +A, -A (T each); 3 canard 3-2-1-1 of man_ua deg, unit man_dt
+     * (additive at the canard); 4 = 3 then 2 after man_gap; 5 canard multisine (man_ua deg rms-ish, man_T long);
+     * 6 rate doublet with canard 3-2-1-1 before it (same as 4, other order) */
+    int man_kind; double man_t0, man_amp, man_T, man_ua, man_dt, man_gap;
     int pwm_quant;   /* 1: fin commands quantised to the PWM tick exactly as PWM_SetFin (ALLOC-01) */
 } Cfg;
 static Cfg C;
@@ -159,7 +164,7 @@ static void cfg_set(const char *k, const char *v)
     D(ground_k) D(ground_c) D(collapse_t) D(chute_delay) D(canopy_swing) D(chute_cd_a) D(cord_len) D(arw) D(vrw) D(acc_bias) D(gyro_bias) D(sf) D(misal_deg) D(gsens)
     D(vib_boost_g) D(vib_res_g) D(vib_res_hz) D(vib_gyro_dps) D(vib_coast_g) D(vib_chute_g)
     D(sv_rate) D(sv_wn) D(sv_zeta) D(sv_tau) D(sv_db) D(sv_lash) D(sv_res) D(sv_travel) D(sv_volt_k) D(sv_extra) D(sv_sod) D(sv_land) D(sv_gain)
-    I(fault_fin) D(fault_t) D(fault_val) I(gps_on) D(gps_sd) I(shadow) I(fin_deg) D(force_deg) D(force_t) I(force_mode) I(pwm_quant) I(trace_dec)
+    I(fault_fin) D(fault_t) D(fault_val) I(gps_on) D(gps_sd) I(shadow) I(fin_deg) D(force_deg) D(force_t) I(force_mode) I(pwm_quant) I(trace_dec) I(man_kind) D(man_t0) D(man_amp) D(man_T) D(man_ua) D(man_dt) D(man_gap)
     fprintf(stderr, "unknown key %s\n", k); exit(2);
 #undef D
 #undef I
@@ -773,7 +778,7 @@ int main(int argc, char **argv)
     if (C.trace[0]) {
         tr = fopen(C.trace, "w");
         fprintf(tr, "t,phase,h,vz,qbar,mach,alpha_deg,p_dps,q_dps,r_dps,pcan_dps,delta0,delta1,delta2,delta3,"
-                    "fin0,h_est,vz_est,qbar_est,fx,fy,fz,trim,ax_imu,ay_imu,az_imu,roll_cmd\n");
+                    "fin0,h_est,vz_est,qbar_est,fx,fy,fz,trim,ax_imu,ay_imu,az_imu,roll_cmd,p_ref_dps,u_exc_deg,gyro_p_dps,V,Ixx\n");
     }
     /* boot: 1 s gyro calibration + accel seed on the pad (as app.c boot()) */
     const double frame_dt = 1.0 / FRAME_HZ;
@@ -848,6 +853,45 @@ int main(int argc, char **argv)
                 in.gps_good = !(P.ignited && (thrust() > 0));
                 in.gps_alt_msl = (float)(C.site_elev + P.p.z + (C.gps_sd * nrand()));
             } else if (C.gps_on) { in.gps_enabled = true; in.gps_alive = true; }
+            if (C.man_kind > 0) {
+                static double t_coast = -1.0;
+                if ((Flight_Phase(&F) == PH_COAST) && (t_coast < 0)) { t_coast = P.t; }
+                double pr = 0.0, ue = 0.0;
+                if (t_coast >= 0) {
+                    const double tm = P.t - t_coast - C.man_t0, A = C.man_amp * D2R, u = C.man_ua * D2R, T = C.man_T, d = C.man_dt;
+                    double t_rate = tm, t_act = tm;
+                    if ((C.man_kind == 4) || (C.man_kind == 7)) { t_rate = tm - (7.0 * d) - C.man_gap; }
+                    if (C.man_kind == 6) { t_act = tm - (2.0 * T) - C.man_gap; }
+                    if ((C.man_kind == 1) && (t_rate >= 0) && (t_rate < T)) { pr = A; }
+                    if ((C.man_kind == 2) || (C.man_kind == 4) || (C.man_kind == 6) || (C.man_kind == 7)) {
+                        if ((t_rate >= 0) && (t_rate < T)) { pr = A; } else if ((t_rate >= T) && (t_rate < 2 * T)) { pr = -A; }
+                    }
+                    if ((C.man_kind == 3) || (C.man_kind == 4) || (C.man_kind == 6) || (C.man_kind == 7)) {
+                        const double k = t_act / d;
+                        if ((k >= 0) && (k < 3)) { ue = u; } else if ((k >= 3) && (k < 5)) { ue = -u; } else if ((k >= 5) && (k < 6)) { ue = u; } else if ((k >= 6) && (k < 7)) { ue = -u; }
+                    }
+                    if ((C.man_kind == 5) && (t_act >= 0) && (t_act < T)) {
+                        /* Schroeder-phased multisine, harmonics of 1/T from 1.5 to 8 Hz, peak-limited to u */
+                        static const int nk = 12; double sum = 0.0;
+                        for (int j = 0; j < nk; j++) {
+                            const double f = 1.5 + (6.5 * j / (nk - 1)), ph = -M_PI * j * (j + 1) / nk;
+                            sum += cos((2.0 * M_PI * floor(f * T + 0.5) / T * t_act) + ph);
+                        }
+                        ue = u * sum / 3.6;
+                        if (ue > u) { ue = u; } if (ue < -u) { ue = -u; }
+                    }
+                }
+                /* kind 7: canard excitation in torque units (man_ua deg at 3 kPa, scaled by 3000/qhat, at most 1.5 deg),
+                 * and a guard as flight code would have: abandon below qhat 1500 Pa or above 200 deg/s */
+                static int man_abort = 0;
+                if (C.man_kind == 7) {
+                    const double qh = (F.nav.qbar > 300.0f) ? F.nav.qbar : 300.0;
+                    ue *= fmin(3000.0 / qh, 1.5 / fmax(C.man_ua, 1e-6));
+                    if ((t_coast >= 0) && ((pr != 0) || (ue != 0)) && ((F.nav.qbar < 1500.0f) || (fabs(P.w.z) > 200.0 * D2R))) { man_abort = 1; }
+                    if (man_abort) { pr = 0; ue = 0; }
+                }
+                F.ctrl.p_ref = (float)pr; F.ctrl.u_exc = (float)ue;
+            }
             Flight_Step(&F, &in, (float)frame_dt);
             for (int i = 0; i < 4; i++) {
                 const double fn = C.pwm_quant ? (double)Alloc_TicksToNorm(Alloc_NormToTicks(F.fin[i])) : (double)F.fin[i];
@@ -906,12 +950,13 @@ int main(int argc, char **argv)
                 trim_last = F.ctrl.trim;
             }
             if (tr && ((frames % ((C.trace_dec > 0) ? C.trace_dec : 4)) == 0)) {
-                fprintf(tr, "%.4f,%u,%.2f,%.2f,%.0f,%.3f,%.3f,%.2f,%.2f,%.2f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.0f,%.2f,%.2f,%.2f,%.4f,%.2f,%.2f,%.2f,%.6f\n",
+                fprintf(tr, "%.4f,%u,%.2f,%.2f,%.0f,%.3f,%.3f,%.2f,%.2f,%.2f,%.1f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.0f,%.2f,%.2f,%.2f,%.4f,%.2f,%.2f,%.2f,%.6f,%.2f,%.3f,%.3f,%.2f,%.4e\n",
                         P.ignited ? P.t - P.t_ign : -(P.t), Phase_Index(ph), P.p.z, P.v.z, P.qbar, P.mach, P.alpha * R2D,
                         P.w.z * R2D, P.w.x * R2D, P.w.y * R2D, P.pc * R2D,
                         P.delta[0] * R2D, P.delta[1] * R2D, P.delta[2] * R2D, P.delta[3] * R2D, F.fin[0],
                         Nav_Height(&F.nav), Nav_VUp(&F.nav), F.nav.qbar, P.f_spec.x, P.f_spec.y, P.f_spec.z, F.ctrl.trim,
-                        IM.out_a[0], IM.out_a[1], IM.out_a[2], (double)F.alloc.v[0]);
+                        IM.out_a[0], IM.out_a[1], IM.out_a[2], (double)F.alloc.v[0], F.ctrl.p_ref * R2D, F.ctrl.u_exc * R2D,
+                        (IM.out_g[2] - gbias[2]), P.V, P.Ixx);
             }
             if ((ph == PH_LANDED) && P.landed && (P.t - P.t_rest > 1.0)) { break; }
             if (P.ignited && (P.t - P.t_ign > C.t_max)) { break; }

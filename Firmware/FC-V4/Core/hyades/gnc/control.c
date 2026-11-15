@@ -67,7 +67,7 @@ static float clampf(float x, float lim)
 void Ctrl_Init(Controller *c)
 {
     c->mode = CTRL_MODE_OFF;
-    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f; c->trim_T = 0.0f;
+    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f; c->trim_T = 0.0f; c->p_ref = 0.0f; c->u_exc = 0.0f; c->eso_init = false;
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; c->omega_prev[i]=0.0f; }
     for (int i=0;i<4;i++) { c->delta_f[i]=0.0f; c->fin_last[i]=0.0f; }
     for (int i=0;i<3;i++) { c->bq_wdot[i].z1=0.0f; c->bq_wdot[i].z2=0.0f; }
@@ -79,7 +79,7 @@ void Ctrl_SetMode(Controller *c, CtrlMode mode)
 {
     if (mode == c->mode) { return; }
     c->mode = mode;
-    if (mode == CTRL_MODE_OFF) { c->trim = 0.0f; c->trim_T = 0.0f; c->dither_k = 0u; c->dither = 0.0f; }   /* trim kept across FULL<->RDAMP */
+    if (mode == CTRL_MODE_OFF) { c->eso_init = false; c->trim = 0.0f; c->trim_T = 0.0f; c->dither_k = 0u; c->dither = 0.0f; }   /* trim kept across FULL<->RDAMP */
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; biquad_preload(c, &c->bq_wdot[i], 0.0f); }
     for (int i=0;i<4;i++) {
         c->delta_f[i] = c->fin_last[i];
@@ -108,15 +108,33 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
      * gain drives the healthy canards to oppose it at once instead of waiting
      * for the trim. The ramp avoids a gain step at the threshold. */
     {
-        const float ex = (fabsf(p) - CTRL_ROLL_BOOST_P) / CTRL_ROLL_BOOST_P;
+        const float ex = (fabsf(p - c->p_ref) - CTRL_ROLL_BOOST_P) / CTRL_ROLL_BOOST_P;
         const float k = (ex <= 0.0f) ? 1.0f : ((ex >= 1.0f) ? (float)CTRL_ROLL_BOOST_K
                                                          : (1.0f + (((float)CTRL_ROLL_BOOST_K - 1.0f) * ex)));
         Kp *= k;
     }
 #endif
-    const float d_damp = -Kp * p;                       /* p_e = ref - p, ref 0 */
+    const float d_damp = Kp * (c->p_ref - p);           /* p_e = ref - p */
+#if CTRL_ROLL_LAW == 2
     if (trim_on) {
-        const float e = -p;
+        const float b0 = CTRL_ESO_BETA * q_e;            /* rad/s^2 per rad at the canard */
+        if (!c->eso_init) { c->eso_z1 = p; c->eso_z2 = 0.0f; c->eso_ua = 0.0f; for (int i = 0; i < 8; i++) { c->eso_u[i] = 0.0f; } c->eso_init = true; }
+        /* modelled canard: the command CTRL_ESO_DN + 1 frames back through a first-order lag (the servo) */
+        const float ud = c->eso_u[(c->eso_k + 8u - (uint32_t)CTRL_ESO_DN) & 7u];
+        c->eso_ua += (dt / (CTRL_ESO_TA + dt)) * (ud - c->eso_ua);
+        const float e = p - c->eso_z1, l1 = 2.0f * CTRL_ESO_WO, l2 = CTRL_ESO_WO * CTRL_ESO_WO;
+        c->eso_z1 += dt * (c->eso_z2 + (b0 * c->eso_ua) + (l1 * e));
+        c->eso_z2 += dt * (l2 * e);
+        float u = d_damp - (c->eso_z2 / b0);
+        u = clampf(u, CTRL_ROLL_TRAVEL_RAD);
+        c->trim = u - d_damp;                             /* for the log: the disturbance cancellation */
+        c->eso_k++; c->eso_u[c->eso_k & 7u] = u;          /* what the canard was told this frame */
+        c->dither = 0.0f;
+        return clampf(u + c->u_exc, CTRL_ROLL_TRAVEL_RAD);
+    }
+#endif
+    if (trim_on) {
+        const float e = c->p_ref - p;
         const float e_band = CTRL_TRIM_BAND_K * CTRL_TRIM_DEADBAND_RAD / Kp;
         const float drive = (fabsf(e) > e_band) ? (e - copysignf(e_band, e)) : 0.0f;
 #if CTRL_TRIM_QSCHED
@@ -150,7 +168,7 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
     /* off, or CTRL_DITHER_NULL: the allocator dithers on the null axis (alloc.c) */
     c->dither = 0.0f;
 #endif
-    return clampf(d_damp + c->trim + c->dither, CTRL_ROLL_TRAVEL_RAD);
+    return clampf(d_damp + c->trim + c->dither + c->u_exc, CTRL_ROLL_TRAVEL_RAD);
 }
 
 /* Gyro-only rate damper: fin = -K * rate, per channel, clipped. With the
@@ -164,7 +182,7 @@ static void rate_damp(Controller *c, const float w[3], float dt, float fin_out[4
 #else
     const float p = 0.0f, y = 0.0f;
 #endif
-#if CTRL_ROLL_LAW == 1
+#if CTRL_ROLL_LAW >= 1
     const float r = Ctrl_RollLaw(c, w[2], dt, false) / FIN_DEFLECT_RAD;
 #else
     (void)c; (void)dt;
@@ -237,7 +255,7 @@ void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
     float inc_p = 0.0f; (void)da[0];
     float inc_y = 0.0f; (void)da[1];
 #endif
-#if CTRL_ROLL_LAW == 1
+#if CTRL_ROLL_LAW >= 1
     /* Roll by the q-scheduled law (absolute command, not an INDI increment):
      * express it as the increment that lands delta_f on it. */
     const float roll_abs = Ctrl_RollLaw(c, omega[2], dt, true) / FIN_DEFLECT_RAD;
@@ -256,7 +274,7 @@ void Ctrl_Update(Controller *c, const float q[4], const float omega[3],
     /* delta_cmd = delta_f + increment, saturated per fin (INDI anti-windup:
      * the SATURATED command is fed back into the actuator filter below). */
     for (int i=0;i<4;i++) {
-#if CTRL_ROLL_LAW == 1
+#if CTRL_ROLL_LAW >= 1
         /* pitch/yaw INDI increments act about the roll common mode */
         const float base = (CTRL_ENABLE_PITCHYAW != 0) ? (c->delta_f[i] - (0.25f*(c->delta_f[0]+c->delta_f[1]+c->delta_f[2]+c->delta_f[3]))) : 0.0f;
         fin_out[i] = clampf(base + dinc[i] + roll_abs, CTRL_FIN_LIMIT);

@@ -176,7 +176,24 @@
  * -(c/q) p + bounded trim. 0 = INDI with the fixed CTRL_EFF_ROLL below, which
  * HITL showed limit-cycles (G is really k_b*q: 270-5500 rad/s^2 per unit fin
  * over the envelope against the fixed 160). */
+#ifndef CTRL_ROLL_LAW
 #define CTRL_ROLL_LAW          1
+#endif
+/* Law 2 (SYSID-01 study, not flown): q-scheduled extended state observer (ADRC). Plant pdot = beta q delta + f,
+ * f the lumped disturbance (bearing friction from the fin can, cant, Cl0, damping); beta is the one model
+ * number (S d Cl_delta / Ixx, nominal), the assumption c already makes. delta = (c/q)(p_ref - p) - f_hat/(beta q). */
+#ifndef CTRL_ESO_BETA
+#define CTRL_ESO_BETA          0.559f   /* 1/(Pa s^2): 3.02e-3 x 0.062 x 0.657 / 2.2e-4 */
+#endif
+#ifndef CTRL_ESO_WO
+#define CTRL_ESO_WO            30.0f    /* rad/s observer bandwidth */
+#endif
+#ifndef CTRL_ESO_DN
+#define CTRL_ESO_DN            2        /* observer input = the command DN+1 frames back (15 ms at DN 2) */
+#endif
+#ifndef CTRL_ESO_TA
+#define CTRL_ESO_TA            0.012f   /* s, first-order servo lag in the observer's input model */
+#endif
 #ifndef CTRL_ROLL_C   /* SITL sweeps override with -D */
 #define CTRL_ROLL_C            15.0f    /* Pa s, Kp = c/q. ADR-004 §3 / MC-01: forward-
                                          * body Ixx 2.2e-4 (fin can decoupled), 200 Hz
