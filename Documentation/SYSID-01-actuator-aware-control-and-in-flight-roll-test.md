@@ -1,12 +1,18 @@
 # SYSID-01: actuator-aware roll control, and the in-flight roll test
 
-**15 November 2026, rev 2.** Labels: [F] simulated or measured result, [I] inference, [S] speculation. Nothing in this note has flown.
+**15 November 2026, rev 3.** Labels: [F] simulated or measured result, [A] analytical (data sheet or HAL source), [I] inference, [S] speculation. Nothing in this note has flown.
 
 - **Rev 1:** SITL study. Would an actuator-aware or MPC law help? Step test; best in-flight schedule.
 - **Rev 2, James 15 Nov:** "How well can we estimate β from ground tests? Flash the new observer law; the first flight should carry the test manoeuvre, as long as it's not too extreme. No fin-can sensor; video from the first flight, inboard, for offline analysis."
   - The observer law (law 2) is the flight law. The roll test is in the flight-1 build. Both were built and flashed on 15 Nov (build `4a68a924`). See §9.
   - The ground-test β budget is in §10. The onboard video is in §11.
   - The fin-can spin sensor is dropped (§7).
+- **Rev 3, James 15 Nov:** "Stop the servos dithering when not in flight phases or relevant tests; run any relevant HITL; provide the key figures; check worst-case clock-cycle execution time."
+  - The dither now runs only in BOOST and COAST (§9.1).
+  - The flight-1 code ran the 29-case HITL campaign (§9.5).
+  - A servo-degradation map gives a new decision, D4 (§9.6).
+  - Worst-case execution time is measured in core cycles (§9.7, WCET-01).
+  - The figures are collected in FIG-02.
 
 **Questions (rev 1):**
 1. Would an MPC-like controller that knows the actuator (delay, threshold, lash, rate limit) gain much? It must keep the current property of having no aerodynamic model.
@@ -52,6 +58,11 @@
    - Video adds little to β: median 0.76 → 0.81, 5–95 % 0.50–0.98 → 0.59–1.04.
    - Its value is direct sight of what nothing else on board measures: the canard's real angle under air load, the fin can's slip and lock-in, and any flutter.
    - Fit the video canard angle to a servo model before using it. Regressing on the raw angle drops the median to 0.58.
+7. **A degraded servo is the observer's weak point (§9.6, rev 3) [F].**
+   - With a servo at 30 ms dead time, 50 rad/s, ζ 0.5, a 0.40° dead band and 0.29° lash, 4 of 600 SITL flights diverge to 1 800–3 500 °/s. This is the HITL `servo_worst` actuator, 2–3× the measured one on every count.
+   - Law 1 stays bounded (381 °/s) but fails coast RMS more often.
+   - At 21 ms, 60 rad/s and 0.2° / 0.2°, the observer passes 600 / 600.
+   - The loaded-servo bench test now decides the flight law (PLAN-01 D4).
 
 ## 2. Why an actuator-aware or MPC law has little to gain
 
@@ -205,7 +216,7 @@ The rise time is a poor measure of β. It correlates only 0.38 with the truth, b
 |---|---|---|---|
 | 1 | Log the roll command at full resolution in ascent (PLAN-01 S14), and log at 200 Hz during the manoeuvre | Identification bias (§6). At high q the 3-2-1-1 amplitude (0.2° at 7.5 kPa) is below the log's 0.24° step. The excitation can be rebuilt from the start event, but the law's part cannot | Proposed, not in flight 1 |
 | 2 | ~~Fin-can spin sensor~~ | — | **Dropped (James, 15 Nov).** Video carries the can's slip offline (§11) |
-| 3 | ESO roll law: ω_o 20, β̂ 1.3× nominal, actuator model 20 ms + 20 ms | 4–5× lower coast roll, robust in SITL | **Done (rev 2): the flight law, flashed 15 Nov.** HITL on the flight build is still to run (G10) |
+| 3 | ESO roll law: ω_o 20, β̂ 1.3× nominal, actuator model 20 ms + 20 ms | 4–5× lower coast roll, robust in SITL | **Done (rev 2): the flight law, flashed 15 Nov.** HITL on the flight-1 code done (rev 3, §9.5); the `CFG_FLIGHT_BUILD` build on the chosen motor is still to run (G10) |
 | 4 | Roll test in the flight code | §5–6 | **Done (rev 2): flight 1, §9** |
 | 5 | Output-error estimator with a fin-can state, using the video slip | Next step for β and φ | Later, after flight 1 |
 | 6 | Ground β: trifilar Ixx (G2) and car-roof roll rig (G13), §10 | β to about ±11 % before flight, independent of the flight test | Proposed |
@@ -213,6 +224,8 @@ The rise time is a poor measure of β. It correlates only 0.38 with the truth, b
 | 8 | Onboard video, flight 1 (§11) | Canard angle under load, can slip and lock-in, flutter | Proposed (PLAN-01 S20) |
 | 9 | `RT_HOLD_S` by motor on the pre-flight sheet: 0.8 s for G77R, G79W and G80T; 0.6 s for G40W, G53FJ and G104T | A longer hold gives a complete step response where q allows (§9.2) | **Decision: James**, with D3 |
 | 10 | Observer gate `CTRL_ESO_Q_ON` from 1 kPa to 300–500 Pa | Coast roll p95 8.3 → 6.7 °/s, maximum 22.8 → 13.4 (§9.4) | **Decision: James.** Needs the robustness campaigns and HITL first |
+| 11 | Dither only in BOOST and COAST | Avoid wearing the servos on the pad and bench (§9.1) | **Done (rev 3), flashed** |
+| 12 | Flight law by the loaded servo (PLAN-01 D4): law 2 if dead time ≤ 21 ms, ω_n ≥ 60 rad/s, and dead band and lash ≤ 0.2°; otherwise law 1 | §9.6 | **Decision: James**, after the loaded bench test |
 
 ## 8. Files
 
@@ -226,18 +239,29 @@ The rise time is a poor measure of β. It correlates only 0.38 with the truth, b
 - `Core/hyades/svc/logrec.h`: `LOGF_ROLLTEST`.
 - `Core/Src/app.c`: the log flag.
 - `Core/Inc/board.h`: `CTRL_ROLL_LAW 2`, `CTRL_ESO_*`, `CFG_ROLL_TEST 1` and `RT_*`, all overridable with `-D`.
+- Rev 3:
+  - `alloc.c/h`: `Alloc_Apply(…, dither, …)`.
+  - `control.c/h`: `dither_en`.
+  - `Core/Src/prof.c`, `Core/Inc/prof.h`: DWT cycle counters.
+  - `app.c`: `tasks [reset]` reports task, frame-by-phase and Flight_Step-section WCET in cycles.
+  - `phase.c/h`: `Phase_NameAt`.
 
 **Tests**
 - `Tests/test_rolltest.c`: 5 tests, with timings taken from `board.h`.
 - `Tests/test_control.c`: 4 ESO tests.
 - `Tests/test_flight.c`: the roll test runs once in a flight and ends with zero outputs.
-- Host tests: 133 / 133.
+- Host tests: 133 / 133 (rev 3: 136 / 136).
 
 **SITL**
 - `Tools/sitl/sitl.c`: roll-test outputs (`rt_state`, `rt_end`, `rt_q`, `rt_q_end`, `rt_t0`, `rt_t1`, `rt_p_max`). R5b excludes the test and the second after it.
 - `Tools/sitl/man.py`: rev-2 video variants (`video_slip`, `video_raw`, `video`, `video_fine`).
-- Campaign scripts: `sysid_campaigns.sh` (rev 1) and `sysid_fl1_campaigns.sh` (rev 2).
-- Figure scripts: `sysid_figs.py` and `sysid_fl1_figs.py`.
+- Campaign scripts: `sysid_campaigns.sh` (rev 1) and `sysid_fl1_campaigns.sh` (rev 2; rev 3 adds the servo campaigns `W*`, `X*`).
+- Figure scripts: `sysid_figs.py`, `sysid_fl1_figs.py` and `fig02_*.py` (FIG-02).
+
+**HITL tools (rev 3)**
+- `Tools/fc_hitl.py` stores the board's `tasks` reply in each case summary.
+- `Tools/hitl_fl1_summary.py`: per-case table.
+- `Tools/wcet_report.py`: the WCET tables and figure (WCET-01).
 
 **Results**
 - `Tools/sitl/runs/{O*,E*,K*,F*,G*,N*,M_fl1*}/summary.json`.
@@ -248,6 +272,14 @@ The rise time is a poor measure of β. It correlates only 0.38 with the truth, b
 ### 9.1 What is flashed
 
 Build `4a68a924`: CubeIDE Debug, 0 warnings. 88 832 B of text against the 98 304 B USB-update limit, so 9.5 KB is left (PLAN-01 S12).
+
+**Rev 3 builds.**
+- `d1c8818f+0a0e0f` (11:29): the dither gate, 88 880 B.
+- `d1c8818f+9b9f4b` (13:58): plus the cycle counters, 89 648 B (8.6 KB left).
+
+The CubeIDE "Debug" configuration compiles at `-O2`, so the WCET is measured at the release optimisation (guideline E1).
+
+**Dither (rev 3).** The ±0.17° 50 Hz null-axis dither runs only in BOOST and COAST. It used to run whenever control was active, including READY with bench actuation: about 100 reversals per second on each servo while on the pad. The bench servo profiles keep their own dither for A/B tests.
 
 **Roll law.**
 - Law 2 (ESO): ω_o 20 rad/s, β̂ 0.727 1/(Pa s²) (1.3× nominal), actuator model 3 + 1 frames of delay and a 20 ms lag.
@@ -278,7 +310,7 @@ Build `4a68a924`: CubeIDE Debug, 0 warnings. 88 832 B of text against the 98 304
 - Flashed over USB. The board booted through CAL → SETTLE → READY with control FULL.
 - Worst-case task times on the pad (frame 5000 µs, budget 4000 µs): flight 577 µs, sense 1568 µs, telemetry 647 µs.
 - In READY the canards held 0.00–0.01° for over a minute. The observer is off on the pad, so it cannot integrate its own command there.
-- **Not yet run on the board:** the in-flight path (observer and test). The flight-build HITL campaign (G10) must cover the observer, a completed test, an abort on each guard, and the WCET in COAST.
+- **In-flight path on the board:** done in HITL, rev 3 (§9.5). The observer ran, the test completed, and the guards fired on hardware. WCET in COAST is in §9.7.
 - **Still open:** the boot message "fin zero read from a version 3 record" (S18). Re-align and save before any further bench or flight work.
 
 ### 9.2 Timing: why it changed from rev 1 [F]
@@ -335,6 +367,62 @@ All three runs have no test, 600 flights each, and all pass 100 %.
 - **The 1 kPa gate costs about 20 % on coast RMS p95 and doubles the maximum.** Near apogee, the slow trim integrator takes over from the observer.
 - **[I]** A gate at 300–500 Pa is worth having. It needs the wide-tolerance, slow-servo and hard-over campaigns, and HITL, before it is flashed, so it is not in the flight-1 build (§7 item 10).
 - The roll test's abort level must stay above the gate.
+
+### 9.5 Hardware-in-the-loop, rev 3 [F]
+
+The flight-1 code (HITL build) ran 29 cases against the PC plant. FIG-02 §7 has the figures and the per-case table.
+- **28 / 29 as expected.** `pad_knock_extreme` is the known false-liftoff probe (PLAN-01 S5).
+- **Roll test:**
+  - done in 19 cases;
+  - abandoned by its guards in 5: rate ×4, q̂ invalid ×1;
+  - skipped in 3: fault in BOOST ×1, q̂ invalid with I205W ×2;
+  - not reached in 2: CATO ×1, false liftoff ×1.
+- **The HITL plant has β̂ 2.8× too high:** whole-vehicle roll inertia, with the fin can locked.
+  - The observer overshoots the doublet: 148 against 115 °/s.
+  - It then rings for about 2 s.
+  - Coast RMS after the test is 8.4 °/s, against 13.6 on law 1 (G79W nominal).
+- **`servo_worst`** gives a ±150–217 °/s limit cycle through coast.
+- **`combined_worst`** diverges to 2 799 °/s. In HITL-02, law 1 at c = 70 had a 4 Hz limit cycle in this case.
+- **Dither on the pad:** max \|fin\| in READY is 0.006° (it was 0.173° on 8 Nov).
+- **Repeat for WCET (campaign `20261115-140954`, flight log erased before each case):** every outcome above was reproduced [F].
+
+### 9.6 Robustness to a degraded servo, rev 3 [F]
+
+SITL, 600 flights per case; FIG-02 §8 and `fig02_servo_robustness.png`.
+
+| Servo | Law 2 (flight-1) | Law 1 |
+|---|---|---|
+| As measured (BENCH-02) | 100 % | — |
+| 30 ms, 50 rad/s, ζ 0.5 only | 99.7 % | — |
+| 0.40° dead band, 0.29° lash only | 100 % | — |
+| 21 ms, 60 rad/s, ζ 0.6; 0.20° / 0.20° | **100 %** | — |
+| 21 ms, 60 rad/s, ζ 0.6; 0.40° / 0.29° | 93.8 %, worst 312 °/s | 86.8 %, worst 306 °/s |
+| HITL `servo_worst` (30 ms, 50 rad/s, 0.5; 0.40° / 0.29°) | 86.0 %, **4 diverge (≤ 3 525 °/s)** | 84.3 %, worst 381 °/s |
+
+**Variants that do not remove the divergence:**
+- a slower observer actuator model (5 frames + 30 ms);
+- ω_o 15;
+- no roll test;
+- a latched hand-over to law 1 at \|p\| > 300 °/s (law 1 cannot recover a canard-saturated limit cycle at 7 kPa). The hand-over code was not kept.
+
+**[I]** The divergence needs a slow servo and a large dead band together, plus the upper half of the β range. **Decision D4 (James):** the loaded servo test sets the flight law (§7 item 12).
+
+### 9.7 Worst-case execution time, rev 3
+
+Measured with the DWT cycle counter on the board (96 MHz, the `-O2` build, interrupts included), on the pad with the real IMU and across a second HITL campaign with the flight log active. Frame: 480 000 cycles; budget (B1, 80 %): 384 000. Tables and margins are in **WCET-01** [F]:
+
+| Item | Cycles | % of frame |
+|---|---|---|
+| Pad, READY, worst frame | 215 371 | 44.9 |
+| COAST, worst frame (HITL) | 72 107 | 15.0 |
+| BOOST, worst frame (HITL) | 85 357 | 17.8 |
+| Flight bound: worst BOOST/COAST frame + worst real IMU read | 237 109 | 49.4 |
+| `control` section (law, observer, roll test), HITL max | 10 967 | 2.3 |
+
+- The observer and roll test cost about 11 k cycles (114 µs) at most. The blocking I2C read of the IMU (up to 152 k cycles) dominates the frame.
+- **Two unmeasured paths break the budget on analysis [A]:**
+  - The log writer at the data-sheet flash time reaches 95 %, still inside the frame.
+  - A stuck I2C bus makes the HAL wait 25 ms per read. Fix before flight: PLAN-01 S23 (WCET-01 §4).
 
 ## 10. β from ground tests (rev 2)
 

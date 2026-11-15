@@ -1,0 +1,105 @@
+{
+  "mhz": 96,
+  "frame_cyc": 480000,
+  "budget_cyc": 384000,
+  "cases": 29,
+  "hitl_max": {
+    "task": {
+      "sense": {
+        "cyc": 151752,
+        "case": "drop_15fr_boost"
+      },
+      "flight": {
+        "cyc": 55435,
+        "case": "gps_garbage_desc"
+      },
+      "log": {
+        "cyc": 35158,
+        "case": "accsf_p3"
+      },
+      "telem": {
+        "cyc": 61713,
+        "case": "thrust_p10"
+      },
+      "comms": {
+        "cyc": 16302,
+        "case": "accsf_m3"
+      },
+      "leds": {
+        "cyc": 490,
+        "case": "thrust_p10"
+      }
+    },
+    "step": {
+      "estimate": {
+        "cyc": 29541,
+        "case": "wind9_gust6"
+      },
+      "monitor": {
+        "cyc": 33715,
+        "case": "i205w_nominal"
+      },
+      "control": {
+        "cyc": 10967,
+        "case": "gyro_spike_coast"
+      },
+      "alloc": {
+        "cyc": 653,
+        "case": "vib_nominal"
+      }
+    },
+    "frame": {
+      "SETTLE": {
+        "cyc": 209609,
+        "case": "thrust_p10"
+      },
+      "READY": {
+        "cyc": 175269,
+        "case": "thrust_p10"
+      },
+      "BOOST": {
+        "cyc": 85357,
+        "case": "pad_knock_short"
+      },
+      "COAST": {
+        "cyc": 72107,
+        "case": "combined_worst"
+      },
+      "DESCENT": {
+        "cyc": 68627,
+        "case": "vib_nominal"
+      },
+      "LANDED": {
+        "cyc": 73633,
+        "case": "drop_15fr_boost"
+      },
+      "CATO": {
+        "cyc": 62093,
+        "case": "drop_15fr_boost"
+      }
+    }
+  },
+  "pad": {
+    "task": {
+      "sense": 151694,
+      "flight": 42857,
+      "log": 120,
+      "telem": 61974,
+      "comms": 13548,
+      "leds": 416
+    },
+    "step": {
+      "estimate": 26614,
+      "monitor": 13132,
+      "control": 1377,
+      "alloc": 603
+    },
+    "frame": {
+      "SETTLE": 190633,
+      "READY": 215371
+    }
+  },
+  "flight_frame_bound_observed_cyc": 237109,
+  "flight_frame_bound_sum_cyc": 321111,
+  "flash_max_corner_cyc": 454379
+}
