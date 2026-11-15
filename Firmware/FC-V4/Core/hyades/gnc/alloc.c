@@ -45,7 +45,7 @@ float Alloc_TicksToNorm(int32_t ticks)
     return (float)ticks / ALLOC_TICKS_PER_NORM;
 }
 
-void Alloc_Apply(Alloc *a, const float cmd[4], bool active, float out[4])
+void Alloc_Apply(Alloc *a, const float cmd[4], bool active, bool dither, float out[4])
 {
     if (!active) {
         for (uint32_t i = 0u; i < 4u; i++) { out[i] = cmd[i]; a->tick[i] = Alloc_NormToTicks(cmd[i]); }
@@ -64,9 +64,10 @@ void Alloc_Apply(Alloc *a, const float cmd[4], bool active, float out[4])
      * +/-a about its command; the canard forces cancel in pairs and the roll
      * contributions cancel between the pairs. */
 #if CTRL_DITHER_ON && CTRL_DITHER_NULL
-    a->dither = (((a->k / (CTRL_DITHER_PERIOD_N / 2u)) & 1u) == 0u) ? ALLOC_DITHER_NORM : -ALLOC_DITHER_NORM;
+    a->dither = !dither ? 0.0f : ((((a->k / (CTRL_DITHER_PERIOD_N / 2u)) & 1u) == 0u) ? ALLOC_DITHER_NORM : -ALLOC_DITHER_NORM);
     n += a->dither;
 #else
+    (void)dither;
     a->dither = 0.0f;
 #endif
 

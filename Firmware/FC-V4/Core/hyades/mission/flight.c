@@ -9,6 +9,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/* cycle profiling of Flight_Step sections on the target (prof.h); nothing on the host */
+#if defined(STM32F411xE) && defined(USE_HAL_DRIVER)
+#include "prof.h"
+#define FLIGHT_PROF_MARK(i) Prof_Mark(i)
+#else
+#define FLIGHT_PROF_MARK(i) ((void)0)
+#endif
 #define D2R 0.017453292519943295f
 
 static void emit(Flight *f, EventCode c, uint32_t a, const char *t)
@@ -206,12 +213,19 @@ static void monitor_and_arbitrate(Flight *f, const FlightIn *in, float dt)
 
 void Flight_Step(Flight *f, const FlightIn *in, float dt)
 {
+    FLIGHT_PROF_MARK(0u);
     for (uint32_t k = 0u; k < 3u; k++) { f->gyro_rad[k] = in->gyro_dps[k] * D2R; }
     estimate(f, in, dt);
+    FLIGHT_PROF_MARK(1u);
     monitor_and_arbitrate(f, in, dt);
+    FLIGHT_PROF_MARK(2u);
     Ctrl_SetQbar(&f->ctrl, f->nav.qbar, Nav_QValid(&f->nav) && (f->ctrl.mode == CTRL_MODE_FULL));
+    const Phase ph = Flight_Phase(f);
+    /* Dither only where the law flies (BOOST, COAST). On the pad and bench it would
+     * only wear the servos: a 50 Hz +/-0.17 deg square wave on every canard. */
+    const bool dither = (ph == PH_BOOST) || (ph == PH_COAST);
+    f->ctrl.dither_en = dither;
     {
-        const Phase ph = Flight_Phase(f);
 #if CTRL_ROLL_LAW == 2
         /* the observer only where the canards make torque (control.c) */
         f->ctrl.eso_enable = ((ph == PH_BOOST) || (ph == PH_COAST)) && Nav_QValid(&f->nav) && (f->nav.qbar >= CTRL_ESO_Q_ON);
@@ -234,7 +248,9 @@ void Flight_Step(Flight *f, const FlightIn *in, float dt)
 #endif
     }
     Ctrl_Update(&f->ctrl, f->iekf.q, f->iekf.omega, f->gyro_rad, dt, f->fin_cmd);
+    FLIGHT_PROF_MARK(3u);
     float fin_alloc[4];
-    Alloc_Apply(&f->alloc, f->fin_cmd, f->ctrl.mode != CTRL_MODE_OFF, fin_alloc);
+    Alloc_Apply(&f->alloc, f->fin_cmd, f->ctrl.mode != CTRL_MODE_OFF, dither, fin_alloc);
     for (uint32_t k = 0u; k < 4u; k++) { f->fin[k] = f->shadow ? 0.0f : fin_alloc[k]; }
+    FLIGHT_PROF_MARK(4u);
 }

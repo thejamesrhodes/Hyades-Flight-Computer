@@ -101,6 +101,33 @@ static void test_phase_sequence_nominal(void)
     TEST_ASSERT_EQUAL(PH_DESCENT, seq[5]);
 }
 
+/* Dither only in BOOST/COAST: with bench actuation in READY the canards hold
+ * still (no 50 Hz square wave on the pad), and the dither starts at liftoff. */
+static void test_dither_only_in_flight(void)
+{
+    Flight_Init(&F, &NC, &DC, MS_TO_FRAMES(READY_HOLD_MS), NAV_BRIDGE_N, true, on_ev, NULL);
+    n_phase = 0u; now_ms = 0u;
+    const float a0[3] = { 0.0f, 0.0f, BOARD_G_MPS2 }, m0[3] = { 0.0f, 0.0f, 0.0f };
+    IEKF_Seed(&F.iekf, a0, m0);
+    Flight_GoPhase(&F, PH_CALIBRATE);
+    Flight_GoPhase(&F, PH_SETTLING);
+    for (uint32_t i = 0u; i < 3u * FRAME_HZ; i++) { step(BOARD_G_MPS2, 0.0f, 0.0f); }
+    TEST_ASSERT_EQUAL(PH_READY, Flight_Phase(&F));
+    TEST_ASSERT_TRUE(F.ctrl.mode != CTRL_MODE_OFF);           /* bench actuation: the law runs */
+    for (uint32_t i = 0u; i < FRAME_HZ; i++) {
+        step(BOARD_G_MPS2, 0.0f, 0.0f);
+        TEST_ASSERT_EQUAL_FLOAT(0.0f, F.alloc.dither);
+        TEST_ASSERT_EQUAL_FLOAT(0.0f, F.ctrl.dither);
+        TEST_ASSERT_FALSE(F.ctrl.dither_en);
+    }
+    uint32_t n_dith = 0u;
+    for (uint32_t i = 0u; i < FRAME_HZ / 2u; i++) {
+        step(8.0f * BOARD_G_MPS2, 0.0f, 0.0f);
+        if (Flight_Phase(&F) == PH_BOOST) { TEST_ASSERT_TRUE(F.ctrl.dither_en); n_dith += (F.alloc.dither != 0.0f) ? 1u : 0u; }
+    }
+    TEST_ASSERT_TRUE(n_dith > 10u);
+}
+
 /* SYSID-01: the roll test is initialised by Flight_Init, runs once in COAST and is
  * finished (done, skipped or abandoned) with zero outputs by DESCENT */
 static void test_roll_test_runs_once_in_coast(void)
@@ -237,5 +264,6 @@ int main(void)
     RUN_TEST(test_liftoff_from_settling_is_sequenced);
     RUN_TEST(test_align_holds_and_liftoff_sequenced);
     RUN_TEST(test_roll_test_runs_once_in_coast);
+    RUN_TEST(test_dither_only_in_flight);
     return UNITY_END();
 }

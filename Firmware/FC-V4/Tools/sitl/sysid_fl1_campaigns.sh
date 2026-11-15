@@ -33,3 +33,18 @@ python3 man.py --exe "$E" --kind 0 --n 20 --out runs/M_fl1_h05
 E=$(python3 -c "import mc;print(mc.build('-DRT_HOLD_S=0.8f -DRT_T0_S=0.15f -DRT_Q_ABORT_PA=1200.0f'))")
 python3 man.py --exe "$E" --kind 0 --n 20 --out runs/M_fl1_h08_q12
 python3 sysid_fl1_figs.py
+# FIG-02 (15 Nov): servo degradation the laws tolerate; the HITL 'servo_worst' actuator split into its parts
+SW="--set sv_tau=0.030 --set sv_wn=50 --set sv_zeta=0.5 --set sv_db=0.007 --set sv_lash=0.005"
+python3 mc.py $B $SW --out runs/W1_fl1_servoworst
+python3 mc.py $B $SW "--variant=-DCTRL_ROLL_LAW=1 -DCFG_ROLL_TEST=0" --out runs/W2_law1_servoworst
+python3 mc.py $B $SW "--variant=-DCTRL_ESO_DN=5 -DCTRL_ESO_TA=0.030f" --out runs/W3_fl1_slowmodel_servoworst
+python3 mc.py $B $SW "--variant=-DCTRL_ESO_WO=15.0f" --out runs/W4_fl1_wo15_servoworst
+python3 mc.py $B $SW "--variant=-DCFG_ROLL_TEST=0" --out runs/W5_fl1_notest_servoworst
+python3 mc.py $B --set sv_tau=0.030 --set sv_wn=50 --set sv_zeta=0.5 --out runs/W6_fl1_slowdyn_only
+python3 mc.py $B --set sv_db=0.007 --set sv_lash=0.005 --out runs/W7_fl1_dblash_only
+python3 mc.py $B --set sv_tau=0.021 --set sv_wn=60 --set sv_zeta=0.6 --set sv_db=0.0035 --set sv_lash=0.0035 --out runs/X1_fl1_slow_db02
+python3 mc.py $B --set sv_tau=0.021 --set sv_wn=60 --set sv_zeta=0.6 --set sv_db=0.007 --set sv_lash=0.005 --out runs/X3_fl1_slow_db04
+python3 mc.py $B --set sv_tau=0.021 --set sv_wn=60 --set sv_zeta=0.6 --set sv_db=0.007 --set sv_lash=0.005 "--variant=-DCTRL_ROLL_LAW=1 -DCFG_ROLL_TEST=0" --out runs/X3L_law1_slow_db04
+OUT=../../../../Documentation/Images/fig02
+python3 fig02_arch.py $OUT; python3 fig02_progress.py $OUT; python3 fig02_sitl.py runs/traces/fig02 $OUT; python3 fig02_servo.py $OUT
+python3 fig02_hitl.py ../logs/hitl $OUT        # needs the two HITL campaigns (logs/hitl is not in git)

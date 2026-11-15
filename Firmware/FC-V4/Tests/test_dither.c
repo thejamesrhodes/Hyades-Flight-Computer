@@ -12,7 +12,7 @@ static Controller C;
 /* +a +a -a -a ... at the frame rate, zero mean over a period, amplitude 1.5 x dead band */
 static void test_dither_square_wave_zero_mean(void)
 {
-    Ctrl_Init(&C); Ctrl_SetMode(&C, CTRL_MODE_FULL); Ctrl_SetQbar(&C, 6000.0f, true);
+    Ctrl_Init(&C); Ctrl_SetMode(&C, CTRL_MODE_FULL); Ctrl_SetQbar(&C, 6000.0f, true); C.dither_en = true;
     float sum = 0.0f;
     for (uint32_t k = 0u; k < 4u * CTRL_DITHER_PERIOD_N; k++) {
         const float d = Ctrl_RollLaw(&C, 0.0f, FRAME_DT_S, false);
@@ -26,7 +26,7 @@ static void test_dither_square_wave_zero_mean(void)
 /* the dither must not drive the trim integrator (it is added after it) */
 static void test_dither_does_not_wind_trim(void)
 {
-    Ctrl_Init(&C); Ctrl_SetMode(&C, CTRL_MODE_FULL); Ctrl_SetQbar(&C, 6000.0f, true);
+    Ctrl_Init(&C); Ctrl_SetMode(&C, CTRL_MODE_FULL); Ctrl_SetQbar(&C, 6000.0f, true); C.dither_en = true;
     for (uint32_t k = 0u; k < 2000u; k++) { (void)Ctrl_RollLaw(&C, 0.0f, FRAME_DT_S, true); }
     TEST_ASSERT_EQUAL_FLOAT(0.0f, C.trim);
 }
@@ -34,11 +34,22 @@ static void test_dither_does_not_wind_trim(void)
 /* off -> no dither, and the phase restarts on re-entry */
 static void test_dither_stops_when_off(void)
 {
-    Ctrl_Init(&C); Ctrl_SetMode(&C, CTRL_MODE_FULL);
+    Ctrl_Init(&C); Ctrl_SetMode(&C, CTRL_MODE_FULL); C.dither_en = true;
     (void)Ctrl_RollLaw(&C, 0.0f, FRAME_DT_S, false);
     Ctrl_SetMode(&C, CTRL_MODE_OFF);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, C.dither);
     TEST_ASSERT_EQUAL_UINT32(0u, C.dither_k);
+}
+
+/* not enabled (pad, bench): no dither, the command holds */
+static void test_dither_disabled_holds(void)
+{
+    Ctrl_Init(&C); Ctrl_SetMode(&C, CTRL_MODE_FULL); Ctrl_SetQbar(&C, 6000.0f, true);
+    TEST_ASSERT_FALSE(C.dither_en);                 /* off unless the flight code enables it */
+    for (uint32_t k = 0u; k < 4u * CTRL_DITHER_PERIOD_N; k++) {
+        TEST_ASSERT_EQUAL_FLOAT(0.0f, Ctrl_RollLaw(&C, 0.0f, FRAME_DT_S, false));
+        TEST_ASSERT_EQUAL_FLOAT(0.0f, C.dither);
+    }
 }
 
 int main(void)
@@ -47,5 +58,6 @@ int main(void)
     RUN_TEST(test_dither_square_wave_zero_mean);
     RUN_TEST(test_dither_does_not_wind_trim);
     RUN_TEST(test_dither_stops_when_off);
+    RUN_TEST(test_dither_disabled_holds);
     return UNITY_END();
 }

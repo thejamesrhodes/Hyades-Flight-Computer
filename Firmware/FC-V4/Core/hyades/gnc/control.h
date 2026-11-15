@@ -67,6 +67,7 @@ typedef struct {
     float trim;               /* bounded trim integrator, rad at the canard   */
     float trim_T;             /* CTRL_TRIM_QSCHED 1: trim state as q*delta (Pa rad) */
     uint32_t dither_k;        /* roll-law calls since actuation began (dither phase) */
+    bool  dither_en;          /* set each frame by the flight code: dither only in BOOST/COAST */
     float dither;             /* dither added this frame, rad at the canard   */
     float p_ref;              /* roll-rate reference, rad/s (0: zero-rate law; test manoeuvres) */
     float u_exc;              /* additive roll excitation, rad at the canard (system ID; 0 normally) */

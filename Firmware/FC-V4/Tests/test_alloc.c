@@ -22,7 +22,7 @@ static void test_roll_sum_preserved(void)
         const float u = (float)s * 0.0001f;
         const float cmd[4] = { u, u, u, u };
         float out[4];
-        Alloc_Apply(&A, cmd, true, out);
+        Alloc_Apply(&A, cmd, true, true, out);
         const float want = 4.0f * u * ALLOC_TICKS_PER_NORM;
         TEST_ASSERT_INT32_WITHIN(1, (int32_t)lroundf(want), tick_sum());
         TEST_ASSERT_FLOAT_WITHIN(0.5f + 1e-3f, want, (float)tick_sum());
@@ -49,7 +49,7 @@ static void test_extra_ticks_pair_first_and_alternate(void)
     for (uint32_t k = 0u; k < 8u; k++) {
         const float u = 10.25f * q;     /* sum 41 ticks = 4 x 10 + 1 extra */
         const float cmd[4] = { u, u, u, u };
-        Alloc_Apply(&A, cmd, true, out);
+        Alloc_Apply(&A, cmd, true, true, out);
         pitch_sum += A.tick[0] - A.tick[2];
     }
     TEST_ASSERT_EQUAL_INT32(0, pitch_sum);
@@ -63,7 +63,7 @@ static void test_null_dither_no_net_moment(void)
     const float z[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     float out[4];
     for (uint32_t k = 0u; k < 2u * CTRL_DITHER_PERIOD_N; k++) {
-        Alloc_Apply(&A, z, true, out);
+        Alloc_Apply(&A, z, true, true, out);
         TEST_ASSERT_TRUE(A.tick[0] != 0);
         TEST_ASSERT_EQUAL_INT32(0, tick_sum());
         TEST_ASSERT_EQUAL_INT32(A.tick[0], A.tick[2]);
@@ -78,11 +78,26 @@ static void test_inactive_passthrough(void)
     Alloc_Init(&A);
     const float cmd[4] = { 0.1f, -0.2f, 0.3f, 0.0f };
     float out[4];
-    Alloc_Apply(&A, cmd, true, out);
-    Alloc_Apply(&A, cmd, false, out);
+    Alloc_Apply(&A, cmd, true, true, out);
+    Alloc_Apply(&A, cmd, false, true, out);
     for (uint32_t i = 0u; i < 4u; i++) { TEST_ASSERT_EQUAL_FLOAT(cmd[i], out[i]); }
     TEST_ASSERT_EQUAL_UINT32(0u, A.k);
     TEST_ASSERT_EQUAL_FLOAT(0.0f, A.dither);
+}
+
+/* dither off (pad, bench): no null-axis square wave, the fins hold still */
+static void test_dither_off_holds_still(void)
+{
+    Alloc_Init(&A);
+    const float cmd[4] = { 0.02f, 0.02f, 0.02f, 0.02f };
+    float out[4], first[4];
+    for (uint32_t k = 0u; k < 4u * CTRL_DITHER_PERIOD_N; k++) {
+        Alloc_Apply(&A, cmd, true, false, out);
+        TEST_ASSERT_EQUAL_FLOAT(0.0f, A.dither);
+        if (k == 0u) { for (uint32_t i = 0u; i < 4u; i++) { first[i] = out[i]; } }
+        for (uint32_t i = 0u; i < 4u; i++) { TEST_ASSERT_FLOAT_WITHIN(1.0f / ALLOC_TICKS_PER_NORM + 1e-6f, first[i], out[i]); }
+    }
+    TEST_ASSERT_TRUE(A.k > 0u);                     /* still active: only the dither is off */
 }
 
 /* roll keeps priority: at full roll there is no room for pitch/yaw, which is
@@ -92,7 +107,7 @@ static void test_roll_priority_saturation(void)
     Alloc_Init(&A);
     const float cmd[4] = { 1.3f, 0.9f, 0.7f, 0.9f };   /* r = 0.95, p = 0.3 */
     float out[4];
-    Alloc_Apply(&A, cmd, true, out);
+    Alloc_Apply(&A, cmd, true, true, out);
     TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.95f, A.v[0]);
     TEST_ASSERT_FLOAT_WITHIN(1e-6f, 0.05f, fabsf(A.v[1]) + fabsf(A.v[3]));
     /* the quantiser rounds to the nearest tick: full authority may be up to half a tick over */
@@ -117,6 +132,7 @@ int main(void)
     RUN_TEST(test_roll_sum_preserved);
     RUN_TEST(test_extra_ticks_pair_first_and_alternate);
     RUN_TEST(test_null_dither_no_net_moment);
+    RUN_TEST(test_dither_off_holds_still);
     RUN_TEST(test_inactive_passthrough);
     RUN_TEST(test_roll_priority_saturation);
     RUN_TEST(test_norm_to_ticks_safe);

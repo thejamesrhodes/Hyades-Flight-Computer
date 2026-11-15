@@ -140,12 +140,17 @@ class Link:
         return None
 
 
-def reboot_to_settle(lk: Link, log) -> None:
+def reboot_to_settle(lk: Link, log, erase_log: bool = False) -> None:
     """Every run starts from a fresh boot (phases are one-way). A HITL build
     accepts 'reboot' in a flight phase while the seam is live; anything else
-    refusing it is a hard stop, not a warning."""
+    refusing it is a hard stop, not a warning. erase_log: erase the flight log
+    first, so the log writer runs in flight as it will on the day (WCET-01)."""
     lk.open()
     lk.cmd("stream off")
+    if erase_log:
+        lk.cmd("log erase")
+        if not lk.wait_line(("log erase: OK", "log erase: FAILED", "ERR"), 25.0):
+            log("   host: no reply to 'log erase'")
     lk.cmd("reboot")
     if not lk.wait_line("rebooting", 3.0):
         lk.close()
@@ -195,7 +200,7 @@ def run(args) -> dict:
           f"{'closed' if args.closed else 'open'} loop, acc SF {args.acc_sf:+.3f}")
 
     lk = Link(args.port, on_line)
-    reboot_to_settle(lk, print)
+    reboot_to_settle(lk, print, getattr(args, "erase_log", False))
     rows, idx, t_wall0 = [], 0, time.monotonic()
     fin = np.zeros(4)
     t_world = 0.0
@@ -268,6 +273,16 @@ def run(args) -> dict:
     except KeyboardInterrupt:
         print("interrupted")
     wall = time.monotonic() - t_wall0
+    # per-task, per-phase frame and per-step WCET in core cycles (app.c 'tasks', prof.h)
+    tasks_lines: list[str] = []
+    try:
+        orig = lk.log_lines
+        lk.log_lines = lambda l: (tasks_lines.append(l), orig(l))
+        lk.cmd("tasks")
+        lk.wait_line("overruns", 2.0)
+        lk.log_lines = orig
+    except Exception as e:  # never lose the run for this
+        tasks_lines.append(f"tasks capture failed: {e!r}")
     lk.cmd("stream on")
     lk.close()
     lines_f.close()
@@ -288,6 +303,7 @@ def run(args) -> dict:
     summ["csv"] = csv_path
     summ["imu_internal_clips"] = veh.imu.clip_count
     summ["board_events"] = [e[1] for e in events]
+    summ["tasks_text"] = tasks_lines
     with open(os.path.join(out_dir, tag + ".json"), "w") as f:
         json.dump(summ, f, indent=2)
     print(json.dumps(summ, indent=2))
@@ -360,6 +376,7 @@ def main() -> None:
     ap.add_argument("--pad-min", type=float, default=10.0, help="s on the pad before ignition (min)")
     ap.add_argument("--pad-max", type=float, default=60.0)
     ap.add_argument("--post-land", type=float, default=15.0)
+    ap.add_argument("--erase-log", action="store_true", help="erase the flight log before the run (log writer active in flight)")
     ap.add_argument("--params", help="sim_params.json (default Tools/sim_params.json)")
     for stream in (sys.stdout, sys.stderr):              # cp1252 consoles vs U+FFFD from the link
         try:

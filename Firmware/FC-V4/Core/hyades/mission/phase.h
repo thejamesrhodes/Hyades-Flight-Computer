@@ -56,6 +56,7 @@ bool        Phase_Recover(PhaseWord *w);
 
 uint8_t     Phase_Index(Phase p);        /* 0..PHASE_COUNT-1, 0xFF if invalid  */
 const char *Phase_Name(Phase p);
+const char *Phase_NameAt(uint8_t i);    /* by Phase_Index; "INVALID" if out of range */
 bool        Phase_InFlight(Phase p);     /* BOOST, COAST, DESCENT              */
 
 /* Fins may move only in BOOST/COAST, and in READY when bench_ready is set

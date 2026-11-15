@@ -67,7 +67,7 @@ static float clampf(float x, float lim)
 void Ctrl_Init(Controller *c)
 {
     c->mode = CTRL_MODE_OFF;
-    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f; c->trim_T = 0.0f; c->p_ref = 0.0f; c->u_exc = 0.0f; c->eso_init = false; c->eso_enable = false; c->eso_k = 0u;
+    c->qbar = 0.0f; c->q_valid = false; c->trim = 0.0f; c->trim_T = 0.0f; c->p_ref = 0.0f; c->u_exc = 0.0f; c->eso_init = false; c->eso_enable = false; c->eso_k = 0u; c->dither_en = false;
     for (int i=0;i<3;i++) { c->e_I[i]=0.0f; c->omega_prev[i]=0.0f; }
     for (int i=0;i<4;i++) { c->delta_f[i]=0.0f; c->fin_last[i]=0.0f; }
     for (int i=0;i<3;i++) { c->bq_wdot[i].z1=0.0f; c->bq_wdot[i].z2=0.0f; }
@@ -177,7 +177,7 @@ float Ctrl_RollLaw(Controller *c, float p, float dt, bool trim_on)
      * Matlab design used 125 Hz, above what a 200 Hz servo frame can carry;
      * P.Dither notes 60-80 Hz as the fallback for a capped frame rate. Added
      * after the trim saturation test, so it never winds the trim. */
-    c->dither = (((c->dither_k / (CTRL_DITHER_PERIOD_N / 2u)) & 1u) == 0u) ? CTRL_DITHER_AMP_RAD : -CTRL_DITHER_AMP_RAD;
+    c->dither = !c->dither_en ? 0.0f : ((((c->dither_k / (CTRL_DITHER_PERIOD_N / 2u)) & 1u) == 0u) ? CTRL_DITHER_AMP_RAD : -CTRL_DITHER_AMP_RAD);
     c->dither_k++;
 #else
     /* off, or CTRL_DITHER_NULL: the allocator dithers on the null axis (alloc.c) */

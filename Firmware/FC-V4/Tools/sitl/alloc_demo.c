@@ -10,7 +10,7 @@ int main(int argc, char **argv)
     for (int k = 0; k < 400; k++) {
         const float u = (mode == 0) ? (0.0040f + (0.0060f * (float)k / 400.0f)) : 0.0f;
         const float c[4] = { u, u, u, u };
-        Alloc_Apply(&a, c, true, out);
+        Alloc_Apply(&a, c, true, true, out);
         printf("%d %.7f %d %d %d %d\n", k, (double)u, (int)a.tick[0], (int)a.tick[1], (int)a.tick[2], (int)a.tick[3]);
     }
     return 0;

@@ -1567,6 +1567,7 @@ class App:
                                      text=True, errors="replace", creationflags=flags)
                 result, size_next, reached_make = None, False, False
                 tail = []                               # shown if the build fails without a compiler error line
+                errs = 0                                # compiler/linker errors or "Build Failed" seen this attempt
                 for line in p.stdout:
                     line = line.rstrip()
                     logf.write(line + "\n")
@@ -1577,10 +1578,16 @@ class App:
                     size_next = line.lstrip().startswith("text")        # the arm-none-eabi-size table
                     if show or size_next:
                         self.ui(lambda l=line: self._write([(l, "err" if " error:" in l else "")]))
+                    if re.search(r"\berror:", line) or "Build Failed" in line:
+                        errs += 1
                     m = re.search(r"Build Finished\. (\d+) errors?, (\d+) warnings?", line)
                     if m:
                         result = (int(m.group(1)), int(m.group(2)))
                 p.wait()
+                # CubeIDE prints "Build Finished. 0 errors" for the indexer step before the compile;
+                # a later error line must still fail the build (PLAN-01 S22, 15 Nov)
+                if errs and result:
+                    result = (max(result[0], errs), result[1])
                 if result and result[0] == 0:
                     break
                 # Eclipse puts the reason a launch failed in the workspace log, not on stdout.

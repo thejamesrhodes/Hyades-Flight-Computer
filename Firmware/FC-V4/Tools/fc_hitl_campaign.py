@@ -74,7 +74,8 @@ CASES = [
 
 DEFAULTS = dict(mode="flight", port=None, frames=0, motor="G79W", closed=True, elev=110.0, wind=2.2, cl0=0.0,
                 acc_sf=0.0, seed=1, gps=True, pad_min=10.0, pad_max=60.0, post_land=15.0, params=None,
-                sim=None, inject=None, gps_fault=None, gps_cfg=None, run_through=False, ignite_regardless=False)
+                sim=None, inject=None, gps_fault=None, gps_cfg=None, run_through=False, ignite_regardless=False,
+                erase_log=False)
 
 
 def judge(summ: dict, expect: dict) -> list[str]:
@@ -102,6 +103,7 @@ def main() -> None:
     ap.add_argument("--only", default="", help="comma-separated substrings")
     ap.add_argument("--append", help="existing campaign dir: add/replace these cases in its campaign.json")
     ap.add_argument("--list", action="store_true")
+    ap.add_argument("--erase-log", action="store_true", help="erase the flight log before every case (WCET with the logger writing)")
     ap.add_argument("--port")
     a = ap.parse_args()
     keys = [k for k in a.only.split(",") if k] or [""]
@@ -122,7 +124,8 @@ def main() -> None:
             results = [r for r in json.load(f) if r.get("name") not in names]
     for i, (name, over, expect) in enumerate(cases):
         print(f"\n=== [{i + 1}/{len(cases)}] {name}: {expect.get('note', '')}")
-        ns = types.SimpleNamespace(**{**DEFAULTS, **over, "name": name, "out_dir": out, "port": a.port})
+        ns = types.SimpleNamespace(**{**DEFAULTS, **over, "name": name, "out_dir": out, "port": a.port,
+                                      "erase_log": a.erase_log or over.get("erase_log", False)})
         try:
             summ = fc_hitl.run(ns)
         except SystemExit as e:

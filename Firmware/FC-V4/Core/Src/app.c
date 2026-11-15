@@ -40,6 +40,7 @@
 #include "flight.h"
 #include "nav.h"
 #include "phase.h"
+#include "prof.h"
 #include "pwm.h"
 #include "sched.h"
 #include "telemetry.h"
@@ -76,6 +77,8 @@ static struct {
     ImuSample  imu;
     bool       overran, skip_overrun;
     uint32_t   frame, deadline, prev_t, t0, loop_us;
+    uint32_t   c0, loop_cyc;                     /* frame start and length in core cycles (prof.h) */
+    uint32_t   frame_wcet_cyc[PHASE_COUNT];      /* longest frame, by the phase at its end      */
     float      dt;
     uint32_t   ckpt;
     uint32_t   imu_fails, overruns;
@@ -577,19 +580,20 @@ typedef struct {
     void      (*run)(void);
     uint16_t    period, offset;          /* in frames */
     uint32_t    wcet_us, last_us;
+    uint32_t    wcet_cyc, last_cyc;      /* the same in core cycles (DWT, 96 MHz)   */
 } Task;
 
 static Task s_tasks[] = {
-    { "sense",    task_sense,    1u,                 0u, 0u, 0u },
-    { "flight",   task_flight,   1u,                 0u, 0u, 0u },
-    { "log",      task_log,      1u,                 0u, 0u, 0u },
+    { "sense",    task_sense,    1u,                 0u, 0u, 0u, 0u, 0u },
+    { "flight",   task_flight,   1u,                 0u, 0u, 0u, 0u, 0u },
+    { "log",      task_log,      1u,                 0u, 0u, 0u, 0u, 0u },
 #if CFG_TELEM_BINARY
-    { "telem",    task_telem,    TELEM_DECIMATE,     0u, 0u, 0u },
+    { "telem",    task_telem,    TELEM_DECIMATE,     0u, 0u, 0u, 0u, 0u },
 #else
-    { "telem",    task_telem,    TEXT_STATUS_DECIMATE, 3u, 0u, 0u },
+    { "telem",    task_telem,    TEXT_STATUS_DECIMATE, 3u, 0u, 0u, 0u, 0u },
 #endif
-    { "comms",    task_comms,    1u,                 0u, 0u, 0u },
-    { "leds",     task_leds,     1u,                 0u, 0u, 0u },
+    { "comms",    task_comms,    1u,                 0u, 0u, 0u, 0u, 0u },
+    { "leds",     task_leds,     1u,                 0u, 0u, 0u, 0u, 0u },
 };
 #define N_TASKS (sizeof s_tasks / sizeof s_tasks[0])
 
@@ -664,12 +668,29 @@ static void cmd_faults(uint32_t argc, char *argv[])
 
 static void cmd_tasks(uint32_t argc, char *argv[])
 {
-    (void)argc; (void)argv;
-    Con_Printf("  task      period  last_us  wcet_us   (frame %lu us, budget %lu us)\r\n",
-               (unsigned long)FRAME_PERIOD_US, (unsigned long)FDIR_LOOP_BUDGET_US);
+    if ((argc > 1u) && (strcmp(argv[1], "reset") == 0)) {
+        for (uint32_t i = 0u; i < N_TASKS; i++) { s_tasks[i].wcet_us = 0u; s_tasks[i].wcet_cyc = 0u; }
+        for (uint32_t i = 0u; i < PHASE_COUNT; i++) { A.frame_wcet_cyc[i] = 0u; }
+        Prof_Reset();
+        Con_Printf("tasks: high-water marks cleared\r\n");
+        return;
+    }
+    const uint32_t mhz = SystemCoreClock / 1000000u;
+    Con_Printf("  task      period  last_us  wcet_us  wcet_cyc   (frame %lu us = %lu cyc, budget %lu us, %lu MHz)\r\n",
+               (unsigned long)FRAME_PERIOD_US, (unsigned long)(FRAME_PERIOD_US * mhz),
+               (unsigned long)FDIR_LOOP_BUDGET_US, (unsigned long)mhz);
     for (uint32_t i = 0u; i < N_TASKS; i++) {
-        Con_Printf("  %-9s %5u  %7lu  %7lu\r\n", s_tasks[i].name, (unsigned)s_tasks[i].period,
-                   (unsigned long)s_tasks[i].last_us, (unsigned long)s_tasks[i].wcet_us);
+        Con_Printf("  %-9s %5u  %7lu  %7lu  %8lu\r\n", s_tasks[i].name, (unsigned)s_tasks[i].period,
+                   (unsigned long)s_tasks[i].last_us, (unsigned long)s_tasks[i].wcet_us, (unsigned long)s_tasks[i].wcet_cyc);
+    }
+    for (uint32_t i = 0u; i < PROF_N_SEC; i++) {
+        Con_Printf("  step:%-9s last_cyc %6lu  wcet_cyc %6lu\r\n", g_prof_sec_name[i],
+                   (unsigned long)g_prof_sec[i].last, (unsigned long)g_prof_sec[i].max);
+    }
+    for (uint32_t i = 0u; i < PHASE_COUNT; i++) {
+        if (A.frame_wcet_cyc[i] == 0u) { continue; }
+        Con_Printf("  frame:%-8s wcet_cyc %7lu  (%lu us)\r\n", Phase_NameAt((uint8_t)i),
+                   (unsigned long)A.frame_wcet_cyc[i], (unsigned long)(A.frame_wcet_cyc[i] / mhz));
     }
     Con_Printf("  overruns %lu, usb tx dropped %lu B, rx dropped %lu B\r\n",
                (unsigned long)A.overruns, (unsigned long)UsbIo_TxDropped(), (unsigned long)UsbIo_RxDropped());
@@ -988,7 +1009,7 @@ static const ConCmd k_cmds[] = {
     { "ver",    "                         build id",                           cmd_ver    },
     { "stream", "[on|off]                 periodic status/telemetry",          cmd_stream },
     { "faults", "[clear]                  FDIR monitors, latch; clear on pad",  cmd_faults },
-    { "tasks",  "                         per-task timing (WCET)",             cmd_tasks  },
+    { "tasks",  "[reset]                  task/frame/step WCET (us, cycles)",  cmd_tasks  },
     { "gps",    "[raw|probe]              GNSS detail, last NMEA, wiring probe", cmd_gps    },
     { "imu",    "[capture]                IMU diagnostics; raw noise capture (ends by reboot)", cmd_imu },
     { "log",    "[info|start|stop|erase|pull]  flight log (internal flash)",   cmd_log    },
@@ -1082,6 +1103,7 @@ static void boot(UART_HandleTypeDef *huart)
     UsbIo_Init();
     Con_Init(k_cmds, (uint32_t)(sizeof k_cmds / sizeof k_cmds[0]));
     Sched_Init();
+    Prof_Init();
     PWM_Init();                                       /* all fins centred */
     Flight_Init(&A.F, &k_nav_cfg, &k_det_cfg, MS_TO_FRAMES(READY_HOLD_MS), NAV_BRIDGE_N,
                 CFG_BENCH_ACTUATE_READY != 0, on_flight_event, NULL);
@@ -1245,6 +1267,7 @@ void App_Run(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
         }
 
         A.t0 = Sched_MicrosNow();
+        A.c0 = Prof_Cyc();
         A.dt = (float)(A.t0 - A.prev_t) * 1e-6f;
         A.prev_t = A.t0;
         if (lockstep || (A.dt <= 0.0f) || (A.dt > 0.1f)) { A.dt = FRAME_DT_S; }   /* sim time */
@@ -1253,12 +1276,19 @@ void App_Run(I2C_HandleTypeDef *hi2c, UART_HandleTypeDef *huart)
         for (uint32_t i = 0u; i < N_TASKS; i++) {
             Task *t = &s_tasks[i];
             if ((A.frame % t->period) != t->offset) { continue; }
-            const uint32_t ts = Sched_MicrosNow();
+            const uint32_t ts = Sched_MicrosNow(), cs = Prof_Cyc();
             t->run();
+            t->last_cyc = Prof_Cyc() - cs;
             t->last_us = Sched_MicrosNow() - ts;
             if (t->last_us > t->wcet_us) { t->wcet_us = t->last_us; }
+            if (t->last_cyc > t->wcet_cyc) { t->wcet_cyc = t->last_cyc; }
         }
+        A.loop_cyc = Prof_Cyc() - A.c0;
         A.loop_us = Sched_MicrosNow() - A.t0;
+        {
+            const uint8_t pi = Phase_Index(Flight_Phase(&A.F));
+            if ((pi < PHASE_COUNT) && (A.loop_cyc > A.frame_wcet_cyc[pi])) { A.frame_wcet_cyc[pi] = A.loop_cyc; }
+        }
 #if CFG_HITL
         if (lockstep) { hitl_reply(); }
 #endif

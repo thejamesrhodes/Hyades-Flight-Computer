@@ -46,6 +46,11 @@ const char *Phase_Name(Phase p)
     return (i < PHASE_COUNT) ? k_names[i] : "INVALID";
 }
 
+const char *Phase_NameAt(uint8_t i)
+{
+    return (i < PHASE_COUNT) ? k_names[i] : "INVALID";
+}
+
 void Phase_Init(PhaseWord *w) { store(w, PH_BOOT); }
 
 bool Phase_Read(const PhaseWord *w, Phase *out)

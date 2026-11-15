@@ -47,8 +47,10 @@ typedef struct {
 
 void    Alloc_Init(Alloc *a);
 /* cmd: law output. active: actuation enabled (mode not OFF); when false the
- * output equals cmd and the dither phase restarts. out: commands to send. */
-void    Alloc_Apply(Alloc *a, const float cmd[4], bool active, float out[4]);
+ * output equals cmd and the dither phase restarts. dither: add the null-space
+ * dither this frame (the flight code sets it only in BOOST/COAST, so the servos
+ * are not worn on the pad or bench). out: commands to send. */
+void    Alloc_Apply(Alloc *a, const float cmd[4], bool active, bool dither, float out[4]);
 /* Normalised command -> ticks about zero (clamped to +/-1, range-checked).
  * Shared with the PWM driver and the SITL so all three quantise identically. */
 int32_t Alloc_NormToTicks(float norm);
